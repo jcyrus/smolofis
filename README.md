@@ -6,6 +6,8 @@ SmolOfis is a custom, lightweight, headless Linux operating system appliance des
 
 Instead of fighting complex configuration scripts or heavy enterprise monoliths, SmolOfis flashes as a single ISO, boots instantly, and exposes a high-performance management dashboard built entirely in Rust.
 
+![SmolOfis dashboard — live host telemetry and core service status](docs/dashboard.webp)
+
 ---
 
 ## 🛠️ The Tech Stack
