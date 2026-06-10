@@ -40,6 +40,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/", get(handlers::dashboard))
         .route("/api/state", get(handlers::api_state))
         .route("/healthz", get(handlers::healthz))
+        .route("/assets/app.css", get(handlers::asset_css))
+        .route("/assets/fonts/{file}", get(handlers::asset_font))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(config.bind_addr)

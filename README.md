@@ -64,7 +64,7 @@ Because this project is actively evolving, breaking changes to the configuration
 
 ### Phase 4: Hardening & Reach (Planned)
 - [ ] Unit and integration tests for the panel's state machine and probes.
-- [ ] Vendor dashboard assets (Tailwind, fonts) so fully offline LANs get the styled UI.
+- [x] Vendor dashboard assets — compiled Tailwind + woff2 fonts embedded in the panel binary; fully offline LANs get the styled UI.
 - [ ] Remote access integrations (Tailscale / Cloudflare Tunnel).
 - [ ] Atomic A/B image updates with rollback (immutable-OS style).
 

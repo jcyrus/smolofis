@@ -1,11 +1,13 @@
 //! HTTP handlers: the Askama-rendered dashboard, the JSON state API the
-//! frontend polls, and a liveness endpoint for systemd/uptime checks.
+//! frontend polls, embedded static assets (stylesheet + fonts, so the
+//! appliance stays fully styled offline), and a liveness endpoint for
+//! systemd/uptime checks.
 
 use std::sync::Arc;
 
 use askama::Template;
-use axum::extract::State;
-use axum::http::StatusCode;
+use axum::extract::{Path, State};
+use axum::http::{header, StatusCode};
 use axum::response::{Html, IntoResponse, Json, Response};
 use serde_json::json;
 use tracing::error;
@@ -13,6 +15,41 @@ use tracing::error;
 use crate::system::{AppState, Metrics, ServiceStatus, Snapshot};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Stylesheet (compiled Tailwind + @font-face) baked into the binary so the
+/// appliance needs no internet and no loose files on disk.
+const APP_CSS: &[u8] = include_bytes!("../assets/app.css");
+
+/// Vendored woff2 font files (latin subset), also baked in.
+const FONTS: &[(&str, &[u8])] = &[
+    (
+        "chakra-petch-500.woff2",
+        include_bytes!("../assets/fonts/chakra-petch-500.woff2"),
+    ),
+    (
+        "chakra-petch-600.woff2",
+        include_bytes!("../assets/fonts/chakra-petch-600.woff2"),
+    ),
+    (
+        "chakra-petch-700.woff2",
+        include_bytes!("../assets/fonts/chakra-petch-700.woff2"),
+    ),
+    (
+        "ibm-plex-mono-400.woff2",
+        include_bytes!("../assets/fonts/ibm-plex-mono-400.woff2"),
+    ),
+    (
+        "ibm-plex-mono-500.woff2",
+        include_bytes!("../assets/fonts/ibm-plex-mono-500.woff2"),
+    ),
+    (
+        "ibm-plex-mono-600.woff2",
+        include_bytes!("../assets/fonts/ibm-plex-mono-600.woff2"),
+    ),
+];
+
+/// Assets are immutable for a given binary; let browsers cache them hard.
+const CACHE_FOREVER: &str = "public, max-age=31536000, immutable";
 
 /// Pre-formatted, template-friendly view of one core service.
 struct ServiceCard {
@@ -95,6 +132,32 @@ pub async fn api_state(State(state): State<Arc<AppState>>) -> Json<serde_json::V
 /// GET /healthz — liveness for systemd watchdogs and external monitors.
 pub async fn healthz() -> &'static str {
     "ok"
+}
+
+/// GET /assets/app.css — the embedded stylesheet.
+pub async fn asset_css() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "text/css; charset=utf-8"),
+            (header::CACHE_CONTROL, CACHE_FOREVER),
+        ],
+        APP_CSS,
+    )
+}
+
+/// GET /assets/fonts/{file} — embedded woff2 fonts.
+pub async fn asset_font(Path(file): Path<String>) -> Response {
+    match FONTS.iter().find(|(name, _)| *name == file) {
+        Some((_, bytes)) => (
+            [
+                (header::CONTENT_TYPE, "font/woff2"),
+                (header::CACHE_CONTROL, CACHE_FOREVER),
+            ],
+            *bytes,
+        )
+            .into_response(),
+        None => (StatusCode::NOT_FOUND, "unknown font asset").into_response(),
+    }
 }
 
 fn api_metrics(m: &Metrics) -> serde_json::Value {

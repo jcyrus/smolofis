@@ -1,0 +1,4 @@
+/* Tailwind entrypoint — compiled by scripts/build-css.sh into tailwind.css. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
