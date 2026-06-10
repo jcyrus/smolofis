@@ -125,17 +125,22 @@ jobs:
             dist/*.sha256
           generate_release_notes: true
 
+      # Recreated from scratch each run via gh: updating an existing release
+      # from a branch ref trips auth bugs in release actions, and a fresh
+      # release also drops the previous run's version-numbered assets.
       - name: Publish rolling nightly release
         if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: nightly
-          name: "SmolOfis nightly (main)"
-          prerelease: true
-          files: |
-            dist/*.iso
-            dist/*.sha256
-          body: |
-            Rolling build of the `main` branch.
-            Flash with: `dd if=smolofis-*.iso of=/dev/sdX bs=4M status=progress conv=fsync`
-            Then browse to **http://smolofis.local**.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete nightly --yes --cleanup-tag || true
+          gh release create nightly dist/*.iso dist/*.sha256 \
+            --prerelease \
+            --target "${GITHUB_SHA}" \
+            --title "SmolOfis nightly (main)" \
+            --notes "$(cat <<'EOF'
+          Rolling build of the `main` branch.
+          Flash with: `dd if=smolofis-*.iso of=/dev/sdX bs=4M status=progress conv=fsync`
+          Then browse to **http://smolofis.local**.
+          EOF
+          )"
