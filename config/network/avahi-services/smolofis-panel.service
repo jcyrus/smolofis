@@ -1,7 +1,12 @@
 <?xml version="1.0" standalone='no'?><!--*-nxml-*-->
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
 <!-- Advertises the SmolOfis control panel so it appears in network browsers
-     (Finder, GNOME Files, Bonjour explorers) as a clickable HTTP service. -->
+     (Finder, GNOME Files, Bonjour explorers) as a clickable HTTP service.
+
+     The _device-info record badges the box with a hardware identity:
+     clients that honor it (notably macOS Finder) render a rackmount
+     server icon instead of a generic computer tile. Port 0 is the
+     convention for this pseudo-service — it advertises metadata only. -->
 <service-group>
   <name replace-wildcards="yes">SmolOfis Control Panel on %h</name>
   <service>
@@ -9,5 +14,10 @@
     <port>80</port>
     <txt-record>path=/</txt-record>
     <txt-record>vendor=smolofis</txt-record>
+  </service>
+  <service>
+    <type>_device-info._tcp</type>
+    <port>0</port>
+    <txt-record>model=Xserve</txt-record>
   </service>
 </service-group>

@@ -221,6 +221,29 @@ EOF
 : > "${ROOTFS}/etc/machine-id"
 rm -f "${ROOTFS}/var/lib/dbus/machine-id"
 
+# TTY login banner: ANSI-colored ASCII identity, no image assets. Raw SGR
+# bytes pass through agetty untouched; agetty expands its own escapes at
+# display time (\n hostname, \4 IPv4 of the default interface, \s/\r OS
+# and kernel release, \l tty line) so a connected monitor immediately
+# shows where the appliance lives on the network.
+ansi_green=$'\033[1;32m' ansi_dim=$'\033[2m' ansi_reset=$'\033[0m'
+cat > "${ROOTFS}/etc/issue" <<EOF
+
+${ansi_green} ____   __  __   ___   _       ___   _____  ___  ____
+/ ___| |  \/  | / _ \ | |     / _ \ |  ___||_ _|/ ___|
+\___ \ | |\/| || | | || |    | | | || |_    | | \___ \\
+ ___) || |  | || |_| || |___ | |_| ||  _|   | |  ___) |
+|____/ |_|  |_| \___/ |_____| \___/ |_|    |___||____/ ${ansi_reset}
+${ansi_dim} ------------------------------------------------------${ansi_reset}
+  the small-office infrastructure appliance
+${ansi_dim}  \s \r on \l${ansi_reset}
+
+  ${ansi_green}panel${ansi_reset}     http://\n.local  --  http://\4
+  ${ansi_dim}gitea     http://\4:3000  --  coolify   http://\4:8000${ansi_reset}
+
+EOF
+chmod 0644 "${ROOTFS}/etc/issue"
+
 # ---------------------------------------------------------------------------
 # Stage 5 — SmolOfis payload (binary, units, configs)
 # ---------------------------------------------------------------------------
@@ -313,21 +336,35 @@ mksquashfs "${ROOTFS}" "${ISO_TREE}/live/filesystem.squashfs" \
 echo "${VERSION}" > "${ISO_TREE}/SMOLOFIS"
 
 cat > "${ISO_TREE}/boot/grub/grub.cfg" <<'EOF'
+# SmolOfis boot menu — themed entirely with GRUB's native text attributes;
+# no background images, no external theme assets.
 set default=0
-set timeout=2
+set timeout=3
 
+# High-resolution graphical terminal (the font ships inside the
+# grub-mkrescue memdisk; fall back to plain text mode if it is missing).
 insmod all_video
 insmod gfxterm
+if loadfont unicode; then
+    set gfxmode=1024x768,auto
+    set gfxpayload=keep
+    terminal_output gfxterm
+fi
+
+# Appliance palette, matching the dashboard: signal green on deep black,
+# with an inverted green bar as the selection highlight.
+set color_normal=light-green/black
+set color_highlight=black/light-green
 
 search --no-floppy --set=root --file /SMOLOFIS
 
 menuentry "SmolOfis Appliance" {
-    linux  /live/vmlinuz boot=live components quiet hostname=smolofis
+    linux  /live/vmlinuz boot=live components quiet splash loglevel=3 vga=current hostname=smolofis
     initrd /live/initrd.img
 }
 
 menuentry "SmolOfis Appliance (persistence)" {
-    linux  /live/vmlinuz boot=live components persistence quiet hostname=smolofis
+    linux  /live/vmlinuz boot=live components persistence quiet splash loglevel=3 vga=current hostname=smolofis
     initrd /live/initrd.img
 }
 
