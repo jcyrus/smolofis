@@ -1,0 +1,119 @@
+# SmolOfis core application stack.
+#
+# Launched by smolofis-infrastructure.service as `docker compose -p smolofis`.
+# All persistent state lives under /var/lib/smolofis/ so the appliance can be
+# re-imaged without losing repositories or deployment data.
+#
+# Secrets (database password, Coolify APP_KEY, ...) are generated once per
+# device by /usr/local/bin/smolofis-firstboot into /etc/smolofis/secrets.env.
+
+name: smolofis
+
+services:
+  # ---------------------------------------------------------------- Gitea --
+  gitea:
+    image: gitea/gitea:1.22
+    container_name: smolofis-gitea
+    restart: unless-stopped
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      GITEA__server__DOMAIN: smolofis.local
+      GITEA__server__ROOT_URL: http://smolofis.local:3000/
+      GITEA__server__SSH_PORT: "2222"
+      GITEA__service__DISABLE_REGISTRATION: "false"
+      GITEA__actions__ENABLED: "true"
+    ports:
+      - "3000:3000"   # web UI + API
+      - "2222:22"     # git over ssh
+    volumes:
+      - /var/lib/smolofis/gitea:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/api/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # -------------------------------------------------------------- Coolify --
+  coolify:
+    image: ghcr.io/coollabsio/coolify:latest
+    container_name: smolofis-coolify
+    restart: unless-stopped
+    depends_on:
+      coolify-db:
+        condition: service_healthy
+      coolify-redis:
+        condition: service_healthy
+    env_file:
+      - /etc/smolofis/secrets.env
+    environment:
+      APP_ENV: production
+      APP_NAME: SmolOfis Coolify
+      APP_URL: http://smolofis.local:8000
+      DB_CONNECTION: pgsql
+      DB_HOST: coolify-db
+      DB_PORT: "5432"
+      DB_DATABASE: coolify
+      DB_USERNAME: coolify
+      REDIS_HOST: coolify-redis
+      PHP_MEMORY_LIMIT: 256M
+      SSL_MODE: "off"
+    ports:
+      - "8000:8080"   # Coolify UI/API
+    volumes:
+      # Coolify orchestrates deployments through the host engine.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/smolofis/coolify/data:/var/www/html/storage
+      - /var/lib/smolofis/coolify/ssh:/var/www/html/storage/app/ssh
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  coolify-db:
+    image: postgres:15-alpine
+    container_name: smolofis-coolify-db
+    restart: unless-stopped
+    env_file:
+      - /etc/smolofis/secrets.env
+    environment:
+      POSTGRES_USER: coolify
+      POSTGRES_DB: coolify
+      # POSTGRES_PASSWORD comes from secrets.env
+    volumes:
+      - /var/lib/smolofis/coolify/db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coolify -d coolify"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  coolify-redis:
+    image: redis:7-alpine
+    container_name: smolofis-coolify-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - /var/lib/smolofis/coolify/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  coolify-realtime:
+    image: ghcr.io/coollabsio/coolify-realtime:1.0.4
+    container_name: smolofis-coolify-realtime
+    restart: unless-stopped
+    env_file:
+      - /etc/smolofis/secrets.env
+    ports:
+      - "6001:6001"
+      - "6002:6002"
+    volumes:
+      - /var/lib/smolofis/coolify/ssh:/var/www/html/storage/app/ssh

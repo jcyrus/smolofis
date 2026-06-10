@@ -2,7 +2,7 @@
 
 > The "smol" infrastructure appliance for agile web teams. No cloud tax. No enterprise bloat. Just pure developer autonomy.
 
-SmolOfis is a custom, lightweight, headless Linux operating system appliance designed to turn any spare hardware (like an M-series Mac Mini or mini-PC) into a fully automated, self-hosted DevOps hub for small engineering teams. 
+SmolOfis is a custom, lightweight, headless Linux operating system appliance designed to turn any spare x86 hardware — a NUC, an N100 mini-PC, a retired desktop — into a fully automated, self-hosted DevOps hub for small engineering teams.
 
 Instead of fighting complex configuration scripts or heavy enterprise monoliths, SmolOfis flashes as a single ISO, boots instantly, and exposes a high-performance management dashboard built entirely in Rust.
 
@@ -10,11 +10,11 @@ Instead of fighting complex configuration scripts or heavy enterprise monoliths,
 
 ## 🛠️ The Tech Stack
 
-- **OS Base:** Minimal, headless Debian/Ubuntu base system configured for appliance stability.
+- **OS Base:** Minimal, headless Debian 13 "trixie" rootfs (debootstrap `minbase`) configured for appliance stability.
 - **Control Plane:** Compiled Rust binary using `axum` (async web engine), `sysinfo` (telemetry), and `askama` (compiled, type-safe HTML templates) with Tailwind CSS.
 - **Git & CI/CD:** Native Gitea integration paired with Gitea Actions for syntax-compatible GitHub pipeline workflows.
 - **Orchestration (PaaS):** Coolify engine for managing automated branch-based builds, databases, and multi-server deployments.
-- **Networking & Discovery:** Built-in Avahi (`smolofis.local` mDNS resolution) and native Tailscale/Cloudflare Tunnel support.
+- **Networking & Discovery:** Built-in Avahi (`smolofis.local` mDNS resolution) with zero-config DHCP via NetworkManager. Remote access (Tailscale / Cloudflare Tunnel) is on the roadmap.
 
 ---
 
@@ -36,8 +36,8 @@ When you power on a machine running SmolOfis, it coordinates initialization grac
 
 SmolOfis is a highly transparent, **ongoing personal portfolio project** aimed at exploring platform engineering, system initialization, and infrastructure automation. 
 
-- **What works right now:** The underlying system architecture design, the core Rust dashboard structure (`src-dashboard`), and the initial `systemd` service orchestration schema.
-- **What is currently being coded:** The automated ISO generation pipelines (`scripts/build-image.sh`) and the type-safe API clients that bridge the Rust UI to Gitea and Coolify.
+- **What works right now:** The complete Rust control plane (live host telemetry, an `Initializing → Ready → Degraded` boot-phase state machine, health probes for Docker/Gitea/Coolify over HTTP and the engine's unix socket), the hardened `systemd` boot orchestration, the Debian 13 ISO build pipeline (`scripts/build-image.sh`), a local mock harness (`scripts/dev-mock.sh`), and the GitHub Actions workflow that compiles and publishes flashable images.
+- **What has not been proven yet:** The generated ISO has not been booted on physical hardware, and the panel has no automated test suite — both are the current focus.
 
 Because this project is actively evolving, breaking changes to the configuration structure are to be expected. Feature requests, architectural feedback, and code contributions are highly encouraged!
 
@@ -45,19 +45,26 @@ Because this project is actively evolving, breaking changes to the configuration
 
 ## 🗺️ Implementation Roadmap
 
-### Phase 1: Core Dashboard (In Progress)
+### Phase 1: Core Dashboard ✅
 - [x] Scaffold workspace structure.
-- [ ] Implement asynchronous service status polling using `tokio` and `reqwest`.
-- [ ] Complete the Tailwind CSS dark-mode telemetry layout.
+- [x] Implement asynchronous service status polling using `tokio` and `reqwest`.
+- [x] Complete the Tailwind CSS dark-mode telemetry layout.
 
-### Phase 2: OS Customization (Up Next)
-- [ ] Build the `debootstrap` / `live-build` workflow configuration.
-- [ ] Inject custom systemd configurations to manage boot sequencing.
-- [ ] Lock down the default minimal package selection.
+### Phase 2: OS Customization ✅
+- [x] Build the `debootstrap` workflow configuration (Debian 13 "trixie", `scripts/build-image.sh`).
+- [x] Inject custom systemd configurations to manage boot sequencing.
+- [x] Lock down the default minimal package selection.
 
 ### Phase 3: The "One-Click" ISO
-- [ ] Create a GitHub Actions workflow to compile the full OS image on every main-branch push.
-- [ ] Release flashable `.iso` files directly via GitHub releases.
+- [x] Create a GitHub Actions workflow to compile the full OS image on every main-branch push.
+- [ ] Smoke-test the ISO in QEMU/KVM as part of CI before flashing real hardware.
+- [ ] Verify the first flashable `.iso` release boots end-to-end on physical hardware.
+
+### Phase 4: Hardening & Reach (Planned)
+- [ ] Unit and integration tests for the panel's state machine and probes.
+- [ ] Vendor dashboard assets (Tailwind, fonts) so fully offline LANs get the styled UI.
+- [ ] Remote access integrations (Tailscale / Cloudflare Tunnel).
+- [ ] Atomic A/B image updates with rollback (immutable-OS style).
 
 ---
 

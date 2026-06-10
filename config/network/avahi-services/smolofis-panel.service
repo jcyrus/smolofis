@@ -1,0 +1,13 @@
+<?xml version="1.0" standalone='no'?><!--*-nxml-*-->
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<!-- Advertises the SmolOfis control panel so it appears in network browsers
+     (Finder, GNOME Files, Bonjour explorers) as a clickable HTTP service. -->
+<service-group>
+  <name replace-wildcards="yes">SmolOfis Control Panel on %h</name>
+  <service>
+    <type>_http._tcp</type>
+    <port>80</port>
+    <txt-record>path=/</txt-record>
+    <txt-record>vendor=smolofis</txt-record>
+  </service>
+</service-group>

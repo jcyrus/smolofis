@@ -1,0 +1,22 @@
+# Default NetworkManager profile for the SmolOfis appliance.
+# Matches any wired interface and brings it up with DHCP so the box is
+# reachable the moment a cable is plugged in. Installed with mode 0600 at
+# /etc/NetworkManager/system-connections/wired-auto.nmconnection.
+
+[connection]
+id=wired-auto
+uuid=8d2cb1a6-4f3e-4f7a-9c2e-0d3e50f0d001
+type=ethernet
+autoconnect=true
+autoconnect-priority=100
+
+[ethernet]
+
+[ipv4]
+method=auto
+# Keep mDNS working alongside DHCP-provided DNS.
+dns-search=local;
+
+[ipv6]
+method=auto
+addr-gen-mode=stable-privacy

@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMOL/OFIS — {{ hostname }}</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2305080a'/%3E%3Cpath d='M3 8h4M9 4l-2 8' stroke='%234df59c' stroke-width='1.5'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          display: ['"Chakra Petch"', 'sans-serif'],
+          mono: ['"IBM Plex Mono"', 'monospace'],
+        },
+        colors: {
+          ink:    '#05080a',
+          panel:  '#0a0f12',
+          edge:   'rgba(125, 245, 175, 0.10)',
+          fg:     '#dce7e1',
+          dim:    '#71837c',
+          signal: '#4df59c',
+          amber:  '#ffb454',
+          alert:  '#ff5f56',
+        },
+      },
+    },
+  };
+</script>
+<style>
+  :root {
+    --signal: #4df59c;
+    --amber: #ffb454;
+    --alert: #ff5f56;
+    --edge: rgba(125, 245, 175, 0.10);
+  }
+
+  body {
+    background-color: #05080a;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(77, 245, 156, 0.06), transparent 70%),
+      linear-gradient(rgba(125, 245, 175, 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(125, 245, 175, 0.025) 1px, transparent 1px);
+    background-size: 100% 100%, 44px 44px, 44px 44px;
+  }
+
+  /* Film grain over everything, very faint */
+  .grain::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 60;
+    opacity: 0.05;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* Cards: sharp panels with corner tick marks */
+  .panel-card {
+    position: relative;
+    background: linear-gradient(180deg, rgba(13, 19, 23, 0.92), rgba(8, 12, 15, 0.92));
+    border: 1px solid var(--edge);
+  }
+  .panel-card::before, .panel-card::after,
+  .panel-card > .tick::before, .panel-card > .tick::after {
+    content: "";
+    position: absolute;
+    width: 9px;
+    height: 9px;
+    border-color: rgba(77, 245, 156, 0.55);
+    border-style: solid;
+  }
+  .panel-card::before        { top: -1px;    left: -1px;  border-width: 1px 0 0 1px; }
+  .panel-card::after         { top: -1px;    right: -1px; border-width: 1px 1px 0 0; }
+  .panel-card > .tick::before { bottom: -1px; left: -1px;  border-width: 0 0 1px 1px; }
+  .panel-card > .tick::after  { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
+
+  /* Status badge dots */
+  .dot { width: 7px; height: 7px; flex: none; }
+  .st-online  .dot { background: var(--signal); box-shadow: 0 0 8px rgba(77,245,156,.8); animation: pulse 2.4s ease-in-out infinite; }
+  .st-pending .dot { background: var(--amber);  box-shadow: 0 0 8px rgba(255,180,84,.8); animation: pulse 1.1s ease-in-out infinite; }
+  .st-offline .dot { background: var(--alert);  box-shadow: 0 0 8px rgba(255,95,86,.8); }
+  .st-online  { color: var(--signal); border-color: rgba(77,245,156,.35); }
+  .st-pending { color: var(--amber);  border-color: rgba(255,180,84,.35); }
+  .st-offline { color: var(--alert);  border-color: rgba(255,95,86,.35); }
+
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+  /* Metric bars */
+  .bar-track { height: 3px; background: rgba(125, 245, 175, 0.08); }
+  .bar-fill  { height: 100%; background: var(--signal); box-shadow: 0 0 10px rgba(77,245,156,.55); transition: width .8s cubic-bezier(.22,1,.36,1); }
+  .bar-fill.warn { background: var(--amber); box-shadow: 0 0 10px rgba(255,180,84,.55); }
+  .bar-fill.crit { background: var(--alert); box-shadow: 0 0 10px rgba(255,95,86,.55); }
+
+  /* Phase pill states */
+  #phase-pill.ph-ready        { color: var(--signal); border-color: rgba(77,245,156,.4); }
+  #phase-pill.ph-initializing { color: var(--amber);  border-color: rgba(255,180,84,.4); }
+  #phase-pill.ph-degraded     { color: var(--alert);  border-color: rgba(255,95,86,.4); }
+
+  /* Staggered page-load reveal */
+  .reveal { opacity: 0; transform: translateY(10px); animation: rise .6s cubic-bezier(.22,1,.36,1) forwards; }
+  .reveal:nth-child(1) { animation-delay: .05s; } .reveal:nth-child(2) { animation-delay: .12s; }
+  .reveal:nth-child(3) { animation-delay: .19s; } .reveal:nth-child(4) { animation-delay: .26s; }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+
+  /* ---- Boot overlay ---- */
+  #boot {
+    position: fixed; inset: 0; z-index: 50;
+    background:
+      radial-gradient(ellipse 70% 45% at 50% 30%, rgba(77,245,156,.05), transparent 70%),
+      #04070a;
+    transition: opacity .9s ease, visibility .9s;
+  }
+  #boot.gone { opacity: 0; visibility: hidden; pointer-events: none; }
+  #boot .sweep {
+    position: absolute; left: 0; right: 0; height: 1px; top: 0;
+    background: linear-gradient(90deg, transparent, rgba(77,245,156,.5), transparent);
+    animation: sweep 3.2s linear infinite;
+  }
+  @keyframes sweep { from { top: -2%; } to { top: 102%; } }
+
+  .bootline { opacity: 0; animation: bootline .3s steps(1) forwards; }
+  .bootline:nth-child(1) { animation-delay: .3s; }
+  .bootline:nth-child(2) { animation-delay: .9s; }
+  .bootline:nth-child(3) { animation-delay: 1.5s; }
+  .bootline:nth-child(4) { animation-delay: 2.1s; }
+  .bootline:nth-child(5) { animation-delay: 2.7s; }
+  @keyframes bootline { to { opacity: 1; } }
+
+  .caret { display: inline-block; width: 8px; height: 15px; background: var(--signal);
+           vertical-align: text-bottom; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .boot-progress {
+    height: 2px; background: rgba(125,245,175,.1); overflow: hidden; position: relative;
+  }
+  .boot-progress::after {
+    content: ""; position: absolute; top: 0; bottom: 0; width: 35%;
+    background: var(--signal); box-shadow: 0 0 12px rgba(77,245,156,.8);
+    animation: scan 1.6s ease-in-out infinite alternate;
+  }
+  @keyframes scan { from { left: -10%; } to { left: 78%; } }
+
+  .wordmark-slash { color: var(--signal); text-shadow: 0 0 18px rgba(77,245,156,.6); }
+</style>
+</head>
+
+<body class="grain min-h-screen font-mono text-fg antialiased selection:bg-signal selection:text-ink">
+
+  <!-- ======== BOOT OVERLAY (visible while phase == initializing) ======== -->
+  <div id="boot" class="{% if phase != "initializing" %}gone{% endif %} flex flex-col items-center justify-center px-6">
+    <div class="sweep"></div>
+    <div class="w-full max-w-md">
+      <div class="font-display text-5xl font-bold tracking-tight text-fg mb-1">
+        SMOL<span class="wordmark-slash">/</span>OFIS
+      </div>
+      <p class="text-[11px] uppercase tracking-[0.35em] text-dim mb-10">small-office infrastructure appliance</p>
+
+      <div class="text-[13px] leading-7 text-dim mb-8">
+        <div class="bootline"><span class="text-signal mr-2">[ OK ]</span>kernel up — control panel online</div>
+        <div class="bootline"><span class="text-signal mr-2">[ OK ]</span>mDNS discovery: http://smolofis.local</div>
+        <div class="bootline"><span class="text-amber mr-2">[ .. ]</span>starting docker engine</div>
+        <div class="bootline"><span class="text-amber mr-2">[ .. ]</span>provisioning gitea — git &amp; ci/cd</div>
+        <div class="bootline"><span class="text-amber mr-2">[ .. ]</span>provisioning coolify — paas engine
+          <span class="caret ml-1"></span></div>
+      </div>
+
+      <div class="boot-progress mb-3"></div>
+      <p class="text-[11px] uppercase tracking-[0.3em] text-dim">
+        initializing system <span id="boot-detail">— waiting for core services</span>
+      </p>
+    </div>
+  </div>
+
+  <!-- ======== DASHBOARD ======== -->
+  <div class="mx-auto max-w-6xl px-5 pb-16 pt-8">
+
+    <!-- Header -->
+    <header class="reveal flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-edge pb-5">
+      <div class="font-display text-2xl font-bold tracking-tight">
+        SMOL<span class="wordmark-slash">/</span>OFIS
+      </div>
+      <div class="hidden text-[11px] uppercase tracking-[0.25em] text-dim sm:block">
+        http://<span id="hostname">{{ hostname }}</span>.local
+      </div>
+      <div class="ml-auto flex items-center gap-4">
+        <span id="phase-pill"
+              class="ph-{{ phase }} inline-flex items-center gap-2 border px-3 py-1 text-[11px] uppercase tracking-[0.2em]">
+          <span class="dot rounded-full bg-current"></span>
+          <span id="phase-label">{{ phase_label }}</span>
+        </span>
+        <span id="clock" class="hidden text-[12px] text-dim tabular-nums md:block">--:--:--</span>
+      </div>
+    </header>
+
+    <!-- Telemetry grid -->
+    <section class="reveal mt-8">
+      <h2 class="mb-3 text-[11px] uppercase tracking-[0.35em] text-dim">// host telemetry</h2>
+      <div class="grid grid-cols-2 gap-px bg-edge lg:grid-cols-4">
+
+        <div class="panel-card p-5"><span class="tick"></span>
+          <p class="text-[10px] uppercase tracking-[0.3em] text-dim">CPU Load</p>
+          <p class="mt-3 font-display text-4xl font-semibold">
+            <span id="m-cpu">{{ cpu }}</span><span class="text-base text-dim">%</span>
+          </p>
+          <div class="bar-track mt-4"><div id="bar-cpu" class="bar-fill" style="width: {{ cpu }}%"></div></div>
+          <p class="mt-2 text-[11px] text-dim">load avg <span id="m-load">{{ load_one }}</span></p>
+        </div>
+
+        <div class="panel-card p-5"><span class="tick"></span>
+          <p class="text-[10px] uppercase tracking-[0.3em] text-dim">Memory</p>
+          <p class="mt-3 font-display text-4xl font-semibold">
+            <span id="m-mem-pct">{{ mem_pct }}</span><span class="text-base text-dim">%</span>
+          </p>
+          <div class="bar-track mt-4"><div id="bar-mem" class="bar-fill" style="width: {{ mem_pct }}%"></div></div>
+          <p class="mt-2 text-[11px] text-dim"><span id="m-mem">{{ mem_used }} / {{ mem_total }}</span> GiB</p>
+        </div>
+
+        <div class="panel-card p-5"><span class="tick"></span>
+          <p class="text-[10px] uppercase tracking-[0.3em] text-dim">Disk</p>
+          <p class="mt-3 font-display text-4xl font-semibold">
+            <span id="m-disk-pct">{{ disk_pct }}</span><span class="text-base text-dim">%</span>
+          </p>
+          <div class="bar-track mt-4"><div id="bar-disk" class="bar-fill" style="width: {{ disk_pct }}%"></div></div>
+          <p class="mt-2 text-[11px] text-dim"><span id="m-disk">{{ disk_used }} / {{ disk_total }}</span> GiB</p>
+        </div>
+
+        <div class="panel-card p-5"><span class="tick"></span>
+          <p class="text-[10px] uppercase tracking-[0.3em] text-dim">Uptime</p>
+          <p class="mt-3 font-display text-4xl font-semibold" id="m-uptime">{{ uptime }}</p>
+          <div class="bar-track mt-4"><div class="bar-fill" style="width: 100%"></div></div>
+          <p class="mt-2 text-[11px] text-dim">panel v<span>{{ version }}</span></p>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Core services -->
+    <section class="reveal mt-10">
+      <h2 class="mb-3 text-[11px] uppercase tracking-[0.35em] text-dim">// core services</h2>
+      <div class="grid gap-px bg-edge md:grid-cols-3">
+        {% for s in services %}
+        <div class="panel-card flex flex-col p-5" data-service="{{ s.id }}"><span class="tick"></span>
+          <div class="flex items-start justify-between gap-3">
+            <div class="flex h-10 w-10 items-center justify-center border border-edge font-display text-lg font-bold text-signal">
+              {% if s.id == "gitea" %}G{% else if s.id == "coolify" %}C{% else %}&#x2B21;{% endif %}
+            </div>
+            <span data-badge
+                  class="st-{{ s.health }} inline-flex items-center gap-2 border px-2.5 py-1 text-[10px] uppercase tracking-[0.2em]">
+              <span class="dot rounded-full"></span><span data-badge-label>{{ s.badge }}</span>
+            </span>
+          </div>
+          <h3 class="mt-4 font-display text-xl font-semibold">{{ s.name }}</h3>
+          <p class="text-[11px] uppercase tracking-[0.2em] text-dim">{{ s.role }}</p>
+          <p data-detail class="mt-3 min-h-[2.5rem] text-[12px] leading-5 text-dim">{{ s.detail }}</p>
+          {% if s.port != 0 %}
+          <a data-open data-port="{{ s.port }}" href="#"
+             class="mt-4 inline-flex w-max items-center gap-2 border border-edge px-4 py-2 text-[11px] uppercase tracking-[0.25em] text-signal transition-colors hover:bg-signal hover:text-ink">
+            open &#x2197;
+          </a>
+          {% else %}
+          <p class="mt-4 px-0 py-2 text-[11px] uppercase tracking-[0.25em] text-dim">internal runtime</p>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="reveal mt-12 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-edge pt-5 text-[11px] uppercase tracking-[0.25em] text-dim">
+      <span>smolofis appliance</span>
+      <span>mdns: smolofis.local</span>
+      <span class="ml-auto">last sync <span id="sync-age" class="text-fg">0s</span> ago</span>
+    </footer>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  var POLL_MS = 2500;
+  var lastSync = Date.now();
+  var bootGone = document.getElementById("boot").classList.contains("gone");
+
+  function $(id) { return document.getElementById(id); }
+  function setText(id, value) { var el = $(id); if (el && el.textContent !== String(value)) el.textContent = value; }
+
+  function barClass(pct) { return pct >= 90 ? "crit" : pct >= 75 ? "warn" : ""; }
+  function setBar(id, pct) {
+    var el = $(id); if (!el) return;
+    el.style.width = pct + "%";
+    el.className = ("bar-fill " + barClass(pct)).trim();
+  }
+
+  function badgeLabel(health) {
+    return health === "online" ? "ONLINE" : health === "offline" ? "OFFLINE" : "STARTING";
+  }
+
+  function applyState(s) {
+    var m = s.metrics;
+    setText("m-cpu", Number(m.cpu_percent).toFixed(1));
+    setText("m-load", Number(m.load_one).toFixed(2));
+    setText("m-mem-pct", m.mem_pct);
+    setText("m-mem", m.mem_used_h + " / " + m.mem_total_h);
+    setText("m-disk-pct", m.disk_pct);
+    setText("m-disk", m.disk_used_h + " / " + m.disk_total_h);
+    setText("m-uptime", m.uptime_h);
+    setText("hostname", m.hostname);
+    setBar("bar-cpu", Math.min(100, Math.round(m.cpu_percent)));
+    setBar("bar-mem", m.mem_pct);
+    setBar("bar-disk", m.disk_pct);
+
+    var pill = $("phase-pill");
+    pill.className = pill.className.replace(/ph-\w+/, "ph-" + s.phase);
+    setText("phase-label", s.phase_label);
+
+    s.services.forEach(function (svc) {
+      var card = document.querySelector('[data-service="' + svc.id + '"]');
+      if (!card) return;
+      var badge = card.querySelector("[data-badge]");
+      badge.className = badge.className.replace(/st-\w+/, "st-" + svc.health);
+      card.querySelector("[data-badge-label]").textContent = badgeLabel(svc.health);
+      card.querySelector("[data-detail]").textContent = svc.detail;
+    });
+
+    // Quick links resolve against whatever host the browser used
+    // (smolofis.local on the LAN, localhost in development).
+    document.querySelectorAll("[data-open]").forEach(function (a) {
+      a.href = "http://" + window.location.hostname + ":" + a.dataset.port + "/";
+    });
+
+    if (s.phase !== "initializing" && !bootGone) {
+      bootGone = true;
+      $("boot").classList.add("gone");
+    }
+    var online = s.services.filter(function (x) { return x.health === "online"; }).length;
+    setText("boot-detail", "— " + online + "/" + s.services.length + " services online");
+    lastSync = Date.now();
+  }
+
+  function poll() {
+    fetch("/api/state", { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(applyState)
+      .catch(function () { /* panel keeps last known state; next poll retries */ })
+      .finally(function () { setTimeout(poll, POLL_MS); });
+  }
+  poll();
+
+  setInterval(function () {
+    setText("sync-age", Math.max(0, Math.round((Date.now() - lastSync) / 1000)) + "s");
+    var d = new Date();
+    setText("clock", [d.getHours(), d.getMinutes(), d.getSeconds()]
+      .map(function (n) { return String(n).padStart(2, "0"); }).join(":"));
+  }, 1000);
+})();
+</script>
+</body>
+</html>

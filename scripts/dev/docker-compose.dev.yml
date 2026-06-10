@@ -1,0 +1,47 @@
+# Local development stack for hacking on the dashboard without an appliance.
+#
+# Runs a real Gitea plus a tiny nginx that impersonates Coolify's health
+# endpoint, so the panel's probes and phase transitions behave exactly like
+# they do on hardware. Launched by scripts/dev-mock.sh.
+
+name: smolofis-dev
+
+services:
+  gitea:
+    image: gitea/gitea:1.22
+    container_name: smolofis-dev-gitea
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      GITEA__service__DISABLE_REGISTRATION: "false"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - gitea-dev-data:/data
+
+  coolify-mock:
+    image: nginx:1.27-alpine
+    container_name: smolofis-dev-coolify-mock
+    ports:
+      - "127.0.0.1:8000:80"
+    configs:
+      - source: coolify_mock_conf
+        target: /etc/nginx/conf.d/default.conf
+
+configs:
+  coolify_mock_conf:
+    content: |
+      server {
+          listen 80;
+          location /api/health {
+              default_type application/json;
+              return 200 '{"status":"ok","mock":true}';
+          }
+          location / {
+              default_type text/html;
+              return 200 '<h1>Coolify mock (smolofis dev stack)</h1>';
+          }
+      }
+
+volumes:
+  gitea-dev-data:

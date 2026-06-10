@@ -1,0 +1,30 @@
+# SmolOfis application stack — Gitea + Coolify under docker compose.
+#
+# Strictly ordered after the Docker engine and the network being online;
+# first boot can take several minutes while images are pulled, hence the
+# generous start timeout. State persists under /var/lib/smolofis/.
+
+[Unit]
+Description=SmolOfis Docker application stack (Gitea + Coolify)
+Documentation=https://github.com/jcyrus/smolofis
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/etc/smolofis
+
+# Generates per-device secrets and persistent storage tracks (idempotent).
+ExecStartPre=/usr/local/bin/smolofis-firstboot
+
+ExecStart=/usr/bin/docker compose --project-name smolofis --file /etc/smolofis/docker-compose.yml up --detach --remove-orphans
+ExecStop=/usr/bin/docker compose --project-name smolofis --file /etc/smolofis/docker-compose.yml stop
+
+# First boot pulls ~2 GB of images on slow office links.
+TimeoutStartSec=1800
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

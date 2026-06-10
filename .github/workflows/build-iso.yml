@@ -1,0 +1,141 @@
+# SmolOfis ISO pipeline.
+#
+# Every push to main (and any v* tag) compiles the Rust control panel as a
+# fully static musl binary, bakes it into a Debian live image with
+# scripts/build-image.sh, and publishes the flashable ISO — as a workflow
+# artifact on every run, and as a GitHub Release on tags plus a rolling
+# "nightly" prerelease on main.
+
+name: Build SmolOfis ISO
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-iso-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-panel:
+    name: Compile smolofis-panel (static musl)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install musl toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
+
+      - name: Install Rust (stable + musl target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-dashboard
+
+      - name: Check formatting & lints
+        working-directory: src-dashboard
+        run: |
+          cargo fmt --check
+          cargo clippy --target x86_64-unknown-linux-musl -- -D warnings
+
+      - name: Build release binary
+        working-directory: src-dashboard
+        run: cargo build --release --target x86_64-unknown-linux-musl
+
+      - name: Sanity-check binary is static
+        run: |
+          file src-dashboard/target/x86_64-unknown-linux-musl/release/smolofis-panel
+          file src-dashboard/target/x86_64-unknown-linux-musl/release/smolofis-panel | grep -q 'static'
+
+      - name: Upload panel binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: smolofis-panel
+          path: src-dashboard/target/x86_64-unknown-linux-musl/release/smolofis-panel
+          if-no-files-found: error
+          retention-days: 7
+
+  build-iso:
+    name: Assemble flashable ISO
+    runs-on: ubuntu-latest
+    needs: build-panel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download panel binary
+        uses: actions/download-artifact@v4
+        with:
+          name: smolofis-panel
+          path: artifacts
+
+      - name: Install image build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            debootstrap squashfs-tools xorriso \
+            grub-pc-bin grub-efi-amd64-bin grub2-common \
+            mtools dosfstools file
+
+      - name: Determine version label
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "version=0.1.0-dev.${GITHUB_RUN_NUMBER}" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Build ISO
+        run: |
+          chmod +x artifacts/smolofis-panel scripts/build-image.sh scripts/smolofis-firstboot.sh
+          sudo --preserve-env=SMOLOFIS_VERSION scripts/build-image.sh \
+            --binary artifacts/smolofis-panel \
+            --version "${{ steps.version.outputs.version }}" \
+            --output "dist/smolofis-${{ steps.version.outputs.version }}-amd64.iso"
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smolofis-iso-${{ steps.version.outputs.version }}
+          path: |
+            dist/*.iso
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.iso
+            dist/*.sha256
+          generate_release_notes: true
+
+      - name: Publish rolling nightly release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: "SmolOfis nightly (main)"
+          prerelease: true
+          files: |
+            dist/*.iso
+            dist/*.sha256
+          body: |
+            Rolling build of the `main` branch.
+            Flash with: `dd if=smolofis-*.iso of=/dev/sdX bs=4M status=progress conv=fsync`
+            Then browse to **http://smolofis.local**.

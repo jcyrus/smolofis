@@ -1,0 +1,14 @@
+# Rust (Cargo.lock is committed: this builds a binary, keep builds reproducible)
+src-dashboard/target/
+
+# Image build outputs
+work/
+dist/
+*.iso
+*.sha256
+
+# Editors / OS noise
+.DS_Store
+*.swp
+.idea/
+.vscode/
