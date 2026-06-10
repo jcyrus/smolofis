@@ -342,7 +342,9 @@ grub-mkrescue -o "${OUTPUT}" "${ISO_TREE}" -- -volid "SMOLOFIS_${VERSION//./_}"
 # ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
-sha256sum "${OUTPUT}" > "${OUTPUT}.sha256"
+# Hash from inside the output directory so the .sha256 records the bare
+# filename and `shasum -c` works wherever the two files are downloaded.
+(cd "$(dirname "${OUTPUT}")" && sha256sum "$(basename "${OUTPUT}")" > "$(basename "${OUTPUT}").sha256")
 log "build complete"
 log "  iso:      ${OUTPUT} ($(du -h "${OUTPUT}" | cut -f1))"
 log "  checksum: $(cut -d' ' -f1 "${OUTPUT}.sha256")"
