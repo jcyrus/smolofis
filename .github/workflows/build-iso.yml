@@ -71,6 +71,8 @@ jobs:
     name: Assemble flashable ISO
     runs-on: ubuntu-latest
     needs: build-panel
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -115,6 +117,54 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
           retention-days: 14
+
+  smoke-test:
+    name: Smoke-test ISO in QEMU
+    runs-on: ubuntu-latest
+    needs: build-iso
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download ISO artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: smolofis-iso-${{ needs.build-iso.outputs.version }}
+          path: .
+
+      - name: Install QEMU + tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-x86 xorriso jq curl
+
+      - name: Boot the ISO and probe the panel
+        run: |
+          chmod +x scripts/smoke-test-iso.sh
+          scripts/smoke-test-iso.sh \
+            --iso "dist/smolofis-${{ needs.build-iso.outputs.version }}-amd64.iso"
+
+      - name: Upload guest serial log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-serial-${{ needs.build-iso.outputs.version }}
+          path: smoke-serial.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  release:
+    name: Publish ISO release
+    runs-on: ubuntu-latest
+    # Only publish images that booted and served the panel in CI.
+    needs: [build-iso, smoke-test]
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download ISO artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: smolofis-iso-${{ needs.build-iso.outputs.version }}
+          path: .
 
       - name: Publish tagged release
         if: startsWith(github.ref, 'refs/tags/v')
