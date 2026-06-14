@@ -228,3 +228,41 @@ fn fmt_uptime(secs: u64) -> String {
         format!("{mins}m {}s", secs % 60)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pct_is_zero_when_total_is_zero() {
+        assert_eq!(pct(0, 0), 0);
+        assert_eq!(pct(5, 0), 0);
+    }
+
+    #[test]
+    fn pct_rounds_to_nearest_whole_percent() {
+        assert_eq!(pct(1, 2), 50);
+        assert_eq!(pct(3, 4), 75);
+        assert_eq!(pct(1, 3), 33);
+    }
+
+    #[test]
+    fn pct_clamps_to_100() {
+        assert_eq!(pct(10, 5), 100);
+    }
+
+    #[test]
+    fn fmt_gib_converts_bytes_to_gibibytes() {
+        assert_eq!(fmt_gib(0), "0.0");
+        assert_eq!(fmt_gib(1_073_741_824), "1.0");
+        assert_eq!(fmt_gib(8_589_934_592), "8.0");
+    }
+
+    #[test]
+    fn fmt_uptime_picks_the_right_granularity() {
+        assert_eq!(fmt_uptime(0), "0m 0s");
+        assert_eq!(fmt_uptime(90), "1m 30s");
+        assert_eq!(fmt_uptime(3_661), "1h 1m");
+        assert_eq!(fmt_uptime(90_061), "1d 1h 1m");
+    }
+}

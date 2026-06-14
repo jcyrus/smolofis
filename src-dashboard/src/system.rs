@@ -218,14 +218,7 @@ impl AppState {
         let services = vec![docker, gitea, coolify];
 
         let all_online = services.iter().all(|s| s.health == ServiceHealth::Online);
-        let phase = if all_online {
-            self.ever_ready.store(true, Ordering::Relaxed);
-            BootPhase::Ready
-        } else if self.ever_ready.load(Ordering::Relaxed) {
-            BootPhase::Degraded
-        } else {
-            BootPhase::Initializing
-        };
+        let phase = decide_phase(all_online, &self.ever_ready);
 
         let mut snap = self.snapshot.write().await;
         if snap.phase != phase {
@@ -322,6 +315,22 @@ pub fn spawn_poller(state: Arc<AppState>) {
     });
 }
 
+/// Pure boot-phase transition rule, factored out of [`AppState::refresh`] so
+/// it can be exercised in isolation. `ever_ready` latches the first instant
+/// every core service is simultaneously online — that latch is what separates
+/// a cold boot still coming up (`Initializing`) from a healthy appliance that
+/// later lost a service (`Degraded`).
+fn decide_phase(all_online: bool, ever_ready: &AtomicBool) -> BootPhase {
+    if all_online {
+        ever_ready.store(true, Ordering::Relaxed);
+        BootPhase::Ready
+    } else if ever_ready.load(Ordering::Relaxed) {
+        BootPhase::Degraded
+    } else {
+        BootPhase::Initializing
+    }
+}
+
 async fn ping_docker_socket(socket: &Path) -> Result<(), String> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -372,4 +381,238 @@ fn epoch_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::StatusCode;
+    use axum::routing::get;
+    use axum::Router;
+    use std::net::SocketAddr;
+    use std::path::PathBuf;
+
+    fn base_config() -> Config {
+        Config {
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            gitea_url: "http://127.0.0.1:0".to_string(),
+            gitea_health_path: "/api/healthz".to_string(),
+            coolify_url: "http://127.0.0.1:0".to_string(),
+            coolify_health_path: "/api/health".to_string(),
+            docker_socket: PathBuf::from("/nonexistent/smolofis-docker.sock"),
+            poll_interval: Duration::from_secs(3),
+            gitea_public_port: 3000,
+            coolify_public_port: 8000,
+        }
+    }
+
+    // ---- boot-phase state machine -----------------------------------------
+
+    #[test]
+    fn phase_starts_initializing_before_first_ready() {
+        let latch = AtomicBool::new(false);
+        assert_eq!(decide_phase(false, &latch), BootPhase::Initializing);
+        assert!(!latch.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn phase_becomes_ready_and_latches() {
+        let latch = AtomicBool::new(false);
+        assert_eq!(decide_phase(true, &latch), BootPhase::Ready);
+        assert!(latch.load(Ordering::Relaxed), "ready must latch ever_ready");
+    }
+
+    #[test]
+    fn phase_degrades_only_after_having_been_ready() {
+        let latch = AtomicBool::new(false);
+        assert_eq!(decide_phase(true, &latch), BootPhase::Ready);
+        // A service drops after the appliance was healthy -> Degraded, not back
+        // to Initializing.
+        assert_eq!(decide_phase(false, &latch), BootPhase::Degraded);
+    }
+
+    #[test]
+    fn phase_recovers_from_degraded_to_ready() {
+        let latch = AtomicBool::new(false);
+        decide_phase(true, &latch);
+        assert_eq!(decide_phase(false, &latch), BootPhase::Degraded);
+        assert_eq!(decide_phase(true, &latch), BootPhase::Ready);
+    }
+
+    // ---- serde / string contract the frontend + JSON API depend on --------
+
+    #[test]
+    fn boot_phase_json_matches_as_str() {
+        for phase in [
+            BootPhase::Initializing,
+            BootPhase::Ready,
+            BootPhase::Degraded,
+        ] {
+            assert_eq!(
+                serde_json::to_value(phase).unwrap(),
+                serde_json::Value::String(phase.as_str().to_string()),
+            );
+        }
+    }
+
+    #[test]
+    fn service_health_json_matches_as_str() {
+        for health in [
+            ServiceHealth::Pending,
+            ServiceHealth::Online,
+            ServiceHealth::Offline,
+        ] {
+            assert_eq!(
+                serde_json::to_value(health).unwrap(),
+                serde_json::Value::String(health.as_str().to_string()),
+            );
+        }
+    }
+
+    #[test]
+    fn boot_default_snapshot_lists_three_pending_services() {
+        let snap = Snapshot::boot_default();
+        assert_eq!(snap.phase, BootPhase::Initializing);
+        assert_eq!(snap.services.len(), 3);
+        assert!(snap
+            .services
+            .iter()
+            .all(|s| s.health == ServiceHealth::Pending));
+        let ids: Vec<_> = snap.services.iter().map(|s| s.id).collect();
+        assert_eq!(ids, ["docker", "gitea", "coolify"]);
+    }
+
+    // ---- HTTP health probe ------------------------------------------------
+
+    async fn spawn_status_server(code: StatusCode) -> SocketAddr {
+        let app = Router::new().route("/health", get(move || async move { code }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        addr
+    }
+
+    #[tokio::test]
+    async fn probe_http_reports_online_on_success() {
+        let addr = spawn_status_server(StatusCode::OK).await;
+        let mut cfg = base_config();
+        cfg.gitea_url = format!("http://{addr}");
+        let state = AppState::new(cfg);
+
+        let status = state
+            .probe_http(
+                "gitea",
+                "Gitea",
+                "Git hosting",
+                &state.config.gitea_url,
+                "/health",
+            )
+            .await;
+
+        assert_eq!(status.health, ServiceHealth::Online);
+        assert!(status.latency_ms.is_some());
+    }
+
+    #[tokio::test]
+    async fn probe_http_reports_offline_on_5xx() {
+        let addr = spawn_status_server(StatusCode::INTERNAL_SERVER_ERROR).await;
+        let mut cfg = base_config();
+        cfg.gitea_url = format!("http://{addr}");
+        let state = AppState::new(cfg);
+
+        let status = state
+            .probe_http(
+                "gitea",
+                "Gitea",
+                "Git hosting",
+                &state.config.gitea_url,
+                "/health",
+            )
+            .await;
+
+        assert_eq!(status.health, ServiceHealth::Offline);
+        assert!(status.latency_ms.is_none());
+        assert!(status.detail.contains("500"));
+    }
+
+    #[tokio::test]
+    async fn probe_http_reports_offline_when_nothing_listens() {
+        // Bind to grab a free port, then drop it so the connection is refused.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+        let mut cfg = base_config();
+        cfg.gitea_url = format!("http://{addr}");
+        let state = AppState::new(cfg);
+
+        let status = state
+            .probe_http(
+                "gitea",
+                "Gitea",
+                "Git hosting",
+                &state.config.gitea_url,
+                "/health",
+            )
+            .await;
+
+        assert_eq!(status.health, ServiceHealth::Offline);
+    }
+
+    // ---- Docker unix-socket ping ------------------------------------------
+
+    fn temp_socket_path(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("smolofis-{}-{}.sock", tag, std::process::id()))
+    }
+
+    /// Accepts exactly one connection and replies with the given raw HTTP
+    /// status line, mimicking the Docker engine's `/_ping` endpoint.
+    fn spawn_socket_responder(path: PathBuf, response: &'static [u8]) {
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut scratch = [0u8; 256];
+                let _ = stream.read(&mut scratch).await;
+                let _ = stream.write_all(response).await;
+            }
+        });
+    }
+
+    #[tokio::test]
+    async fn docker_ping_ok_on_200() {
+        let path = temp_socket_path("ping-ok");
+        let _ = std::fs::remove_file(&path);
+        spawn_socket_responder(
+            path.clone(),
+            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK",
+        );
+
+        let result = ping_docker_socket(&path).await;
+        std::fs::remove_file(&path).ok();
+        assert!(result.is_ok(), "expected Ok, got {result:?}");
+    }
+
+    #[tokio::test]
+    async fn docker_ping_errors_on_non_200() {
+        let path = temp_socket_path("ping-500");
+        let _ = std::fs::remove_file(&path);
+        spawn_socket_responder(path.clone(), b"HTTP/1.1 500 Internal Server Error\r\n\r\n");
+
+        let result = ping_docker_socket(&path).await;
+        std::fs::remove_file(&path).ok();
+        let err = result.expect_err("non-200 must be an error");
+        assert!(
+            err.contains("500"),
+            "error should surface the status: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn docker_ping_errors_when_socket_missing() {
+        let result = ping_docker_socket(Path::new("/nonexistent/smolofis-missing.sock")).await;
+        let err = result.expect_err("missing socket must be an error");
+        assert!(err.contains("does not exist"), "got: {err}");
+    }
 }
