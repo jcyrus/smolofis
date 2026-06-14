@@ -38,8 +38,8 @@ When you power on a machine running SmolOfis, it coordinates initialization grac
 
 SmolOfis is a highly transparent, **ongoing personal portfolio project** aimed at exploring platform engineering, system initialization, and infrastructure automation. 
 
-- **What works right now:** The complete Rust control plane (live host telemetry, an `Initializing → Ready → Degraded` boot-phase state machine, health probes for Docker/Gitea/Coolify over HTTP and the engine's unix socket), the hardened `systemd` boot orchestration, the Debian 13 ISO build pipeline (`scripts/build-image.sh`), a local mock harness (`scripts/dev-mock.sh`), and the GitHub Actions workflow that compiles and publishes flashable images.
-- **What has not been proven yet:** The generated ISO has not been booted on physical hardware, and the panel has no automated test suite — both are the current focus.
+- **What works right now:** The complete Rust control plane (live host telemetry, an `Initializing → Ready → Degraded` boot-phase state machine, health probes for Docker/Gitea/Coolify over HTTP and the engine's unix socket) backed by a `cargo test` unit suite, the hardened `systemd` boot orchestration, the Debian 13 ISO build pipeline (`scripts/build-image.sh`), a local mock harness (`scripts/dev-mock.sh`), and the GitHub Actions workflow that compiles and publishes flashable images.
+- **What has not been proven yet:** The generated ISO has not been booted on physical hardware (or in CI) — that is the current focus.
 
 Because this project is actively evolving, breaking changes to the configuration structure are to be expected. Feature requests, architectural feedback, and code contributions are highly encouraged!
 
@@ -63,7 +63,7 @@ Because this project is actively evolving, breaking changes to the configuration
 - [ ] Verify the first flashable `.iso` release boots end-to-end on physical hardware.
 
 ### Phase 4: Hardening & Reach (Planned)
-- [ ] Unit and integration tests for the panel's state machine and probes.
+- [x] Unit tests for the panel's state machine, health probes, and config parsing.
 - [x] Vendor dashboard assets — compiled Tailwind + woff2 fonts embedded in the panel binary; fully offline LANs get the styled UI.
 - [ ] Remote access integrations (Tailscale / Cloudflare Tunnel).
 - [ ] Atomic A/B image updates with rollback (immutable-OS style).

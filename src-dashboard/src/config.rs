@@ -63,3 +63,71 @@ fn env_parsed<T: std::str::FromStr>(key: &str, default: T) -> T {
         Err(_) => default,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Each test uses a uniquely-named env var so process-global env state can't
+    // race across the parallel test runner.
+
+    #[test]
+    fn env_or_falls_back_when_unset() {
+        assert_eq!(env_or("SMOLOFIS_TEST_OR_UNSET", "fallback"), "fallback");
+    }
+
+    #[test]
+    fn env_or_falls_back_on_blank() {
+        std::env::set_var("SMOLOFIS_TEST_OR_BLANK", "   ");
+        assert_eq!(env_or("SMOLOFIS_TEST_OR_BLANK", "fallback"), "fallback");
+        std::env::remove_var("SMOLOFIS_TEST_OR_BLANK");
+    }
+
+    #[test]
+    fn env_or_reads_value_when_set() {
+        std::env::set_var("SMOLOFIS_TEST_OR_SET", "custom");
+        assert_eq!(env_or("SMOLOFIS_TEST_OR_SET", "fallback"), "custom");
+        std::env::remove_var("SMOLOFIS_TEST_OR_SET");
+    }
+
+    #[test]
+    fn env_parsed_reads_and_trims_value() {
+        std::env::set_var("SMOLOFIS_TEST_PARSE_OK", "  42  ");
+        assert_eq!(env_parsed::<u16>("SMOLOFIS_TEST_PARSE_OK", 7), 42);
+        std::env::remove_var("SMOLOFIS_TEST_PARSE_OK");
+    }
+
+    #[test]
+    fn env_parsed_falls_back_on_garbage() {
+        std::env::set_var("SMOLOFIS_TEST_PARSE_BAD", "not-a-number");
+        assert_eq!(env_parsed::<u16>("SMOLOFIS_TEST_PARSE_BAD", 7), 7);
+        std::env::remove_var("SMOLOFIS_TEST_PARSE_BAD");
+    }
+
+    #[test]
+    fn env_parsed_falls_back_when_unset() {
+        assert_eq!(env_parsed::<u64>("SMOLOFIS_TEST_PARSE_UNSET", 3), 3);
+    }
+
+    #[test]
+    fn from_env_uses_appliance_defaults() {
+        // Clear the vars this assertion depends on so a polluted environment
+        // can't make the defaults test flaky.
+        for key in [
+            "SMOLOFIS_GITEA_URL",
+            "SMOLOFIS_GITEA_HEALTH_PATH",
+            "SMOLOFIS_DOCKER_SOCKET",
+            "SMOLOFIS_POLL_INTERVAL_SECS",
+            "SMOLOFIS_GITEA_PUBLIC_PORT",
+        ] {
+            std::env::remove_var(key);
+        }
+
+        let cfg = Config::from_env();
+        assert_eq!(cfg.gitea_url, "http://127.0.0.1:3000");
+        assert_eq!(cfg.gitea_health_path, "/api/healthz");
+        assert_eq!(cfg.docker_socket, PathBuf::from("/var/run/docker.sock"));
+        assert_eq!(cfg.poll_interval, Duration::from_secs(3));
+        assert_eq!(cfg.gitea_public_port, 3000);
+    }
+}
