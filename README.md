@@ -39,7 +39,7 @@ When you power on a machine running SmolOfis, it coordinates initialization grac
 SmolOfis is a highly transparent, **ongoing personal portfolio project** aimed at exploring platform engineering, system initialization, and infrastructure automation. 
 
 - **What works right now:** The complete Rust control plane (live host telemetry, an `Initializing → Ready → Degraded` boot-phase state machine, health probes for Docker/Gitea/Coolify over HTTP and the engine's unix socket) backed by a `cargo test` unit suite, the hardened `systemd` boot orchestration, the Debian 13 ISO build pipeline (`scripts/build-image.sh`), a local mock harness (`scripts/dev-mock.sh`), and the GitHub Actions workflow that compiles and publishes flashable images.
-- **What has not been proven yet:** The generated ISO has not been booted on physical hardware (or in CI) — that is the current focus.
+- **What has not been proven yet:** The generated ISO boots headless in QEMU under CI, but has not yet been booted on physical hardware — that is the current focus.
 
 Because this project is actively evolving, breaking changes to the configuration structure are to be expected. Feature requests, architectural feedback, and code contributions are highly encouraged!
 
