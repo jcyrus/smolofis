@@ -134,7 +134,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: smolofis-iso-${{ needs.build-iso.outputs.version }}
-          path: .
+          # upload-artifact strips the common dist/ prefix, so the artifact
+          # holds bare-named files; restore them under dist/ where the smoke
+          # script and the publish steps expect them.
+          path: dist
 
       - name: Install QEMU + tooling
         run: |
@@ -168,7 +171,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: smolofis-iso-${{ needs.build-iso.outputs.version }}
-          path: .
+          # upload-artifact strips the common dist/ prefix, so the artifact
+          # holds bare-named files; restore them under dist/ where the smoke
+          # script and the publish steps expect them.
+          path: dist
 
       - name: Publish tagged release
         if: startsWith(github.ref, 'refs/tags/v')
