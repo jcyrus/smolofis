@@ -12,6 +12,10 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+  # Build + smoke-test the ISO on PRs too; the release job stays gated to
+  # main/tags (see its `if:`), so pull requests validate without publishing.
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
