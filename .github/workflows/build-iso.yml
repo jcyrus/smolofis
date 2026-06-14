@@ -54,6 +54,13 @@ jobs:
           cargo fmt --check
           cargo clippy --target x86_64-unknown-linux-musl -- -D warnings
 
+      # Run the suite on the host (gnu) target: the tests bind real TCP/unix
+      # sockets and must actually execute, which the native target does without
+      # the cross-run friction of the static musl build.
+      - name: Run unit tests
+        working-directory: src-dashboard
+        run: cargo test --locked
+
       - name: Build release binary
         working-directory: src-dashboard
         run: cargo build --release --target x86_64-unknown-linux-musl
