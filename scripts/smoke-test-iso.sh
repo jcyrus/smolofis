@@ -117,8 +117,20 @@ else
   PERSIST_DIR="${WORK}/persist_root"
   if command -v qemu-img >/dev/null 2>&1 && command -v mkfs.ext4 >/dev/null 2>&1; then
     log "creating 10GB persistent storage disk for smoke test..."
-    mkdir -p "${PERSIST_DIR}"
-    echo "/ union" > "${PERSIST_DIR}/persistence.conf"
+    mkdir -p "${PERSIST_DIR}/var/lib/docker" \
+             "${PERSIST_DIR}/var/lib/containerd" \
+             "${PERSIST_DIR}/var/lib/smolofis" \
+             "${PERSIST_DIR}/var/lib/tailscale" \
+             "${PERSIST_DIR}/etc/smolofis" \
+             "${PERSIST_DIR}/home"
+    cat > "${PERSIST_DIR}/persistence.conf" <<'EOF'
+/var/lib/docker bind
+/var/lib/containerd bind
+/var/lib/smolofis bind
+/var/lib/tailscale bind
+/etc/smolofis bind
+/home bind
+EOF
     qemu-img create -f raw "${SCRATCH_DISK}" 10G >/dev/null
     mkfs.ext4 -F -q -L "persistence" -d "${PERSIST_DIR}" "${SCRATCH_DISK}"
     EXTRA_QEMU_ARGS+=(-drive "file=${SCRATCH_DISK},format=raw,if=virtio")

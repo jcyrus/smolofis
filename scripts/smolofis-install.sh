@@ -209,12 +209,13 @@ mount "${PART_DATA}" "${DATA_MNT}"
 cat > "${DATA_MNT}/persistence.conf" <<'EOF'
 /var/lib/smolofis bind
 /var/lib/docker bind
+/var/lib/containerd bind
 /etc/smolofis bind
 /var/lib/tailscale bind
 /etc/NetworkManager/system-connections bind
 /home bind
 EOF
-mkdir -p "${DATA_MNT}/var/lib/smolofis/gitea" "${DATA_MNT}/var/lib/smolofis/coolify" "${DATA_MNT}/var/lib/tailscale" "${DATA_MNT}/var/lib/docker"
+mkdir -p "${DATA_MNT}/var/lib/smolofis/gitea" "${DATA_MNT}/var/lib/smolofis/coolify" "${DATA_MNT}/var/lib/tailscale" "${DATA_MNT}/var/lib/docker" "${DATA_MNT}/var/lib/containerd"
 chmod 0700 "${DATA_MNT}/var/lib/tailscale"
 chown -R 1000:1000 "${DATA_MNT}/var/lib/smolofis/gitea" 2>/dev/null || true
 sync
