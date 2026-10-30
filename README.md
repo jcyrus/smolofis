@@ -27,8 +27,37 @@ When you power on a machine running SmolOfis, it coordinates initialization grac
 1. **Kernel Bootstrap:** The stripped-down kernel boots and brings up core networking targets.
 2. **Instant UI Panel:** A specialized systemd service launches the `smolofis-panel` Rust binary on port `80`. It immediately serves a responsive "System Initializing..." interface.
 3. **Daemon Initialization:** Background systemd workers launch the Docker engine and network discovery layers (`avahi-daemon`).
-4. **App Ecosystem Spin-up:** Docker automatically starts pre-configured Gitea, Coolify, and local storage orchestration layers.
+4. **App Ecosystem Spin-up:** Docker automatically starts pre-configured Gitea, Coolify, Gitea Actions runner, and local storage orchestration layers.
 5. **Dashboard Transition:** The Rust panel polls the core services locally. Once they pass health checks, the UI shifts smoothly to the operational management cockpit.
+
+---
+
+## 🔐 Operator Access & Administration
+
+SmolOfis boots headless but provides full local console and SSH access:
+
+- **Default User:** `smolofis`
+- **Default Password:** `smolofis` (change immediately via `passwd`)
+- **Privileges:** Passwordless `sudo` rights
+- **SSH Port:** `22` (`ssh smolofis@smolofis.local`)
+- **Port Allocation:**
+  - Panel: `http://smolofis.local` (port `80`)
+  - Gitea: `http://smolofis.local:3000`
+  - Coolify: `http://smolofis.local:8000`
+  - Git over SSH: port `2222`
+
+---
+
+## 💾 Data Persistence on Bare Metal
+
+When booted as a live ISO, the appliance runs in a temporary RAM filesystem overlay. To persist repositories and deployments across reboots:
+
+1. Create an `ext4` partition on your internal drive (e.g. `/dev/nvme0n1p2` or `/dev/sda2`).
+2. Label it `SMOLOFIS_DATA`:
+   ```bash
+   sudo e2label /dev/nvme0n1p2 SMOLOFIS_DATA
+   ```
+3. SmolOfis will automatically discover and mount this partition at `/var/lib/smolofis` on boot.
 
 ---
 

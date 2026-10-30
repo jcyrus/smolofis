@@ -37,6 +37,21 @@ services:
       retries: 10
       start_period: 30s
 
+  # ------------------------------------------------- Gitea Actions Runner --
+  gitea-runner:
+    image: gitea/act_runner:latest
+    container_name: smolofis-gitea-runner
+    restart: unless-stopped
+    depends_on:
+      gitea:
+        condition: service_healthy
+    environment:
+      GITEA_INSTANCE_URL: "http://gitea:3000"
+      CONFIG_FILE: /data/config.yaml
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/smolofis/gitea-runner:/data
+
   # -------------------------------------------------------------- Coolify --
   coolify:
     image: ghcr.io/coollabsio/coolify:latest
@@ -110,10 +125,14 @@ services:
     image: ghcr.io/coollabsio/coolify-realtime:1.0.4
     container_name: smolofis-coolify-realtime
     restart: unless-stopped
+    depends_on:
+      coolify-redis:
+        condition: service_healthy
     env_file:
       - /etc/smolofis/secrets.env
+    environment:
+      REDIS_HOST: coolify-redis
+      REDIS_PORT: "6379"
     ports:
       - "6001:6001"
       - "6002:6002"
-    volumes:
-      - /var/lib/smolofis/coolify/ssh:/var/www/html/storage/app/ssh

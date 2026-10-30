@@ -239,7 +239,8 @@ ${ansi_dim} ------------------------------------------------------${ansi_reset}
 ${ansi_dim}  \s \r on \l${ansi_reset}
 
   ${ansi_green}panel${ansi_reset}     http://\n.local  --  http://\4
-  ${ansi_dim}gitea     http://\4:3000  --  coolify   http://\4:8000${ansi_reset}
+  ${ansi_dim}gitea     http://\4:3000  --  coolify   http://\4:8000
+  login     smolofis / smolofis (ssh on port 22)${ansi_reset}
 
 EOF
 chmod 0644 "${ROOTFS}/etc/issue"
@@ -252,6 +253,7 @@ log "stage 5/8: injecting smolofis payload"
 # Control panel binary — root-owned, world-executable, nothing else.
 install -o root -g root -m 0755 "${PANEL_BINARY}" "${ROOTFS}/usr/local/bin/smolofis-panel"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-firstboot.sh" "${ROOTFS}/usr/local/bin/smolofis-firstboot"
+install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-register-runner.sh" "${ROOTFS}/usr/local/bin/smolofis-register-runner"
 
 # systemd orchestration units.
 install -o root -g root -m 0644 \
@@ -289,6 +291,25 @@ log "stage 6/8: service user + unit enablement"
 run_in_chroot "useradd --system --no-create-home --shell /usr/sbin/nologin smolofis-panel && \
     usermod -aG docker smolofis-panel"
 
+# Default operator account for console and SSH access.
+ADMIN_USER="smolofis"
+ADMIN_PASSWORD="${SMOLOFIS_ADMIN_PASSWORD:-smolofis}"
+run_in_chroot "useradd -m -s /bin/bash -G sudo,docker ${ADMIN_USER} && \
+    echo '${ADMIN_USER}:${ADMIN_PASSWORD}' | chpasswd"
+
+# Grant sudo access without password prompt on the appliance.
+install -d -m 0755 "${ROOTFS}/etc/sudoers.d"
+echo "${ADMIN_USER} ALL=(ALL:ALL) NOPASSWD: ALL" > "${ROOTFS}/etc/sudoers.d/99-smolofis-admin"
+chmod 0440 "${ROOTFS}/etc/sudoers.d/99-smolofis-admin"
+
+# Ensure SSH permits password login for the operator user.
+install -d -m 0755 "${ROOTFS}/etc/ssh/sshd_config.d"
+cat > "${ROOTFS}/etc/ssh/sshd_config.d/smolofis.conf" <<'EOF'
+PasswordAuthentication yes
+KbdInteractiveAuthentication yes
+EOF
+chmod 0644 "${ROOTFS}/etc/ssh/sshd_config.d/smolofis.conf"
+
 # Lock the root account unless the builder explicitly provides a password
 # (useful for debug images: SMOLOFIS_ROOT_PASSWORD=... sudo scripts/build-image.sh ...).
 if [[ -n "${SMOLOFIS_ROOT_PASSWORD:-}" ]]; then
@@ -296,7 +317,7 @@ if [[ -n "${SMOLOFIS_ROOT_PASSWORD:-}" ]]; then
     echo "root:${SMOLOFIS_ROOT_PASSWORD}" | chroot "${ROOTFS}" chpasswd
 else
     run_in_chroot "passwd -l root"
-    log "root account locked (headless appliance; set SMOLOFIS_ROOT_PASSWORD to override)"
+    log "root account locked (operator user '${ADMIN_USER}' is provisioned)"
 fi
 
 systemctl --root="${ROOTFS}" enable \

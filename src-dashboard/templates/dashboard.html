@@ -235,7 +235,7 @@
           <p class="text-[11px] uppercase tracking-[0.2em] text-dim">{{ s.role }}</p>
           <p data-detail class="mt-3 min-h-[2.5rem] text-[12px] leading-5 text-dim">{{ s.detail }}</p>
           {% if s.port != 0 %}
-          <a data-open data-port="{{ s.port }}" href="#"
+          <a data-open data-port="{{ s.port }}" href="http://{{ hostname }}.local:{{ s.port }}/"
              class="mt-4 inline-flex w-max items-center gap-2 border border-edge px-4 py-2 text-[11px] uppercase tracking-[0.25em] text-signal transition-colors hover:bg-signal hover:text-ink">
             open &#x2197;
           </a>

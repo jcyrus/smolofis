@@ -7,7 +7,7 @@
 # into the smolofis-panel binary at compile time. Run after changing
 # tailwind.config.js or adding/removing Tailwind classes in the template.
 #
-# Requires node/npx. The woff2 files in assets/fonts/ are committed and only
+# Requires pnpm (or npx fallback). The woff2 files in assets/fonts/ are committed and only
 # need refreshing if the font families change.
 
 set -euo pipefail
@@ -17,12 +17,19 @@ DASHBOARD="$(dirname "${SCRIPT_DIR}")/src-dashboard"
 
 log() { printf '\033[1;32m[build-css]\033[0m %s\n' "$*"; }
 
-command -v npx >/dev/null 2>&1 || { echo "npx (node) is required" >&2; exit 1; }
+if command -v pnpm >/dev/null 2>&1; then
+    RUNNER="pnpm dlx"
+elif command -v npx >/dev/null 2>&1; then
+    RUNNER="npx --yes"
+else
+    echo "pnpm (or npx) is required" >&2
+    exit 1
+fi
 
 cd "${DASHBOARD}"
 
-log "compiling tailwind (templates/ scan, minified)"
-npx --yes tailwindcss@3.4.17 \
+log "compiling tailwind (${RUNNER} templates/ scan, minified)"
+${RUNNER} tailwindcss@3.4.17 \
     --config tailwind.config.js \
     --input assets/input.css \
     --output assets/tailwind.css \

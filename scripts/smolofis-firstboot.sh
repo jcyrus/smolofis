@@ -20,16 +20,44 @@ rand_hex() { head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 rand_b64() { head -c "$1" /dev/urandom | base64 | tr -d '\n'; }
 
 # ---------------------------------------------------------------------------
-# Persistent storage tracks
+# Storage auto-detection & persistent tracks
 # ---------------------------------------------------------------------------
+# If /var/lib/smolofis is currently unmounted and a partition labeled
+# SMOLOFIS_DATA or persistence exists, mount it automatically.
+if ! mountpoint -q "${STATE_ROOT}" 2>/dev/null; then
+    PERSIST_DEV=""
+    if [[ -b /dev/disk/by-label/SMOLOFIS_DATA ]]; then
+        PERSIST_DEV="/dev/disk/by-label/SMOLOFIS_DATA"
+    elif [[ -b /dev/disk/by-label/persistence ]]; then
+        PERSIST_DEV="/dev/disk/by-label/persistence"
+    fi
+
+    if [[ -n "${PERSIST_DEV}" ]]; then
+        log "mounting persistent data partition (${PERSIST_DEV}) at ${STATE_ROOT}"
+        install -d -m 0755 "${STATE_ROOT}"
+        mount "${PERSIST_DEV}" "${STATE_ROOT}"
+    else
+        log "NOTICE: no persistent partition labeled SMOLOFIS_DATA detected; operating in memory/transient mode"
+    fi
+fi
+
 log "ensuring persistent storage tracks under ${STATE_ROOT}"
 install -d -m 0755 "${STATE_ROOT}"
+
+# Gitea runs as UID 1000:GID 1000 inside the container.
 install -d -m 0750 "${STATE_ROOT}/gitea"
+chown -R 1000:1000 "${STATE_ROOT}/gitea"
+
+# Gitea Actions Runner persistent session data.
+install -d -m 0755 "${STATE_ROOT}/gitea-runner"
+
+# Coolify uses UID 9999 (www-data) and GID 0 (root).
 install -d -m 0750 "${STATE_ROOT}/coolify"
 install -d -m 0700 "${STATE_ROOT}/coolify/db"
 install -d -m 0750 "${STATE_ROOT}/coolify/data"
 install -d -m 0700 "${STATE_ROOT}/coolify/ssh"
 install -d -m 0750 "${STATE_ROOT}/coolify/redis"
+chown -R 9999:0 "${STATE_ROOT}/coolify/data" "${STATE_ROOT}/coolify/ssh"
 
 # ---------------------------------------------------------------------------
 # Per-device secrets (generated once, then immutable)

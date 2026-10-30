@@ -141,11 +141,18 @@ impl Monitor {
         self.sys.refresh_cpu_usage();
         self.sys.refresh_memory();
 
-        // Sum physical disks; skip pseudo-filesystems sysinfo already hides.
+        // Query the root filesystem directly; avoid summing transient overlay/container mounts.
         let disks = Disks::new_with_refreshed_list();
-        let (disk_total, disk_avail) = disks.list().iter().fold((0u64, 0u64), |(t, a), d| {
-            (t + d.total_space(), a + d.available_space())
-        });
+        let primary_disk = disks
+            .list()
+            .iter()
+            .find(|d| d.mount_point() == Path::new("/"))
+            .or_else(|| disks.list().first());
+
+        let (disk_total, disk_avail) = match primary_disk {
+            Some(d) => (d.total_space(), d.available_space()),
+            None => (0, 0),
+        };
 
         Metrics {
             cpu_percent: self.sys.global_cpu_usage(),
