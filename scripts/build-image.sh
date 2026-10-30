@@ -291,10 +291,12 @@ install -o root -g root -m 0644 \
     "${REPO_ROOT}/config/systemd/smolofis-infrastructure.service" \
     "${ROOTFS}/etc/systemd/system/"
 
-# Application stack definition.
-install -d -m 0755 "${ROOTFS}/etc/smolofis"
+# Application stack definition (installed to /etc/smolofis and system backup /usr/share/smolofis).
+install -d -m 0755 "${ROOTFS}/etc/smolofis" "${ROOTFS}/usr/share/smolofis"
 install -o root -g root -m 0644 \
     "${REPO_ROOT}/config/docker/docker-compose.yml" "${ROOTFS}/etc/smolofis/docker-compose.yml"
+install -o root -g root -m 0644 \
+    "${REPO_ROOT}/config/docker/docker-compose.yml" "${ROOTFS}/usr/share/smolofis/docker-compose.yml"
 
 # mDNS / network discovery.
 install -o root -g root -m 0644 \
@@ -312,9 +314,7 @@ install -o root -g root -m 0600 \
 
 # Persistent storage root (populated by smolofis-firstboot at runtime).
 install -d -m 0755 "${ROOTFS}/var/lib/smolofis"
-install -d -m 0700 "${ROOTFS}/var/lib/smolofis/tailscale"
-rm -rf "${ROOTFS}/var/lib/tailscale"
-ln -s "/var/lib/smolofis/tailscale" "${ROOTFS}/var/lib/tailscale"
+install -d -m 0700 "${ROOTFS}/var/lib/tailscale"
 
 # Pre-cache core Docker stack images (enabled via --precache-images).
 if [[ ${PRECACHE_IMAGES} -eq 1 ]]; then

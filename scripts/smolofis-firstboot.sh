@@ -90,20 +90,16 @@ services:
 EOF
 fi
 
-# Tailscale persistent node state track
-install -d -m 0700 "${STATE_ROOT}/tailscale"
-if [[ ! -L /var/lib/tailscale ]]; then
-    if [[ -d /var/lib/tailscale ]]; then
-        cp -a /var/lib/tailscale/* "${STATE_ROOT}/tailscale/" 2>/dev/null || true
-        rm -rf /var/lib/tailscale
-    fi
-    ln -s "${STATE_ROOT}/tailscale" /var/lib/tailscale
-fi
-
 # ---------------------------------------------------------------------------
 # Per-device secrets (generated once, then immutable)
 # ---------------------------------------------------------------------------
 install -d -m 0755 "${CONF_ROOT}"
+
+# If /etc/smolofis is a fresh persistent bind mount, restore the compose definition from system image
+if [[ ! -s "${CONF_ROOT}/docker-compose.yml" && -f /usr/share/smolofis/docker-compose.yml ]]; then
+    log "restoring docker-compose.yml from /usr/share/smolofis/docker-compose.yml"
+    cp /usr/share/smolofis/docker-compose.yml "${CONF_ROOT}/docker-compose.yml"
+fi
 
 if [[ -s "${SECRETS_FILE}" ]]; then
     log "secrets already provisioned at ${SECRETS_FILE} — leaving untouched"
