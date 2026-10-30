@@ -69,11 +69,7 @@ pub async fn ingress_dispatch(
 }
 
 /// Forwards an HTTP request to the upstream application proxy (Coolify/Traefik).
-async fn forward_to_proxy(
-    client: &reqwest::Client,
-    target_base: &str,
-    req: Request,
-) -> Response {
+async fn forward_to_proxy(client: &reqwest::Client, target_base: &str, req: Request) -> Response {
     let method = req.method().clone();
     let uri = req.uri().clone();
     let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
