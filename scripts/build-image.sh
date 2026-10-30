@@ -312,6 +312,9 @@ install -o root -g root -m 0600 \
 
 # Persistent storage root (populated by smolofis-firstboot at runtime).
 install -d -m 0755 "${ROOTFS}/var/lib/smolofis"
+install -d -m 0700 "${ROOTFS}/var/lib/smolofis/tailscale"
+rm -rf "${ROOTFS}/var/lib/tailscale"
+ln -s "/var/lib/smolofis/tailscale" "${ROOTFS}/var/lib/tailscale"
 
 # Pre-cache core Docker stack images (enabled via --precache-images).
 if [[ ${PRECACHE_IMAGES} -eq 1 ]]; then

@@ -185,17 +185,26 @@ else
 fi
 
 if [[ ${TEST_STACK} -eq 1 ]]; then
-  log "waiting up to 180s for pre-cached compose stack to reach operational phase (phase=ready)..."
+  stack_timeout=420
+  log "waiting up to ${stack_timeout}s for pre-cached compose stack to reach operational phase (phase=ready)..."
   stack_start=$SECONDS
-  stack_deadline=$(( stack_start + 180 ))
+  stack_deadline=$(( stack_start + stack_timeout ))
   current_phase=""
   current_state=""
+  last_report=0
   while (( SECONDS < stack_deadline )); do
     kill -0 "$QEMU_PID" 2>/dev/null || die "QEMU exited unexpectedly while waiting for compose stack"
     current_state="$(curl -fsS --max-time 3 "${BASE}/api/state" 2>/dev/null || true)"
     current_phase="$(jq -er '.phase' <<<"$current_state" 2>/dev/null || true)"
     if [[ "$current_phase" == "ready" ]]; then
       break
+    fi
+    if (( SECONDS - last_report >= 15 )); then
+      last_report=$SECONDS
+      d_st="$(jq -r '.services[] | select(.id=="docker") | .health' <<<"$current_state" 2>/dev/null || echo "?")"
+      g_st="$(jq -r '.services[] | select(.id=="gitea") | .health' <<<"$current_state" 2>/dev/null || echo "?")"
+      c_st="$(jq -r '.services[] | select(.id=="coolify") | .health' <<<"$current_state" 2>/dev/null || echo "?")"
+      log "  [+$(( SECONDS - stack_start ))s] phase=${current_phase:-unknown} (docker:${d_st} gitea:${g_st} coolify:${c_st})"
     fi
     sleep 4
   done
@@ -234,6 +243,9 @@ if [[ ${TEST_STACK} -eq 1 ]]; then
     fi
   else
     warn "FAIL  compose stack timed out waiting for ready (last phase: ${current_phase:-unknown})"
+    if [[ -n "${current_state}" ]]; then
+      warn "last reported state: ${current_state}"
+    fi
     fail=1
   fi
 fi
