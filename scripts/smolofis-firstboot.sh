@@ -88,4 +88,35 @@ EOF
     chmod 0600 "${SECRETS_FILE}"
 fi
 
+# ---------------------------------------------------------------------------
+# Pre-cached Docker image ingestion
+# ---------------------------------------------------------------------------
+CACHE_TAR="/usr/share/smolofis/core-images.tar"
+LOAD_MARKER="${STATE_ROOT}/.images-loaded"
+
+if [[ -f "${CACHE_TAR}" && ! -f "${LOAD_MARKER}" ]]; then
+    log "found pre-cached container image bundle at ${CACHE_TAR}"
+    # Ensure Docker daemon socket is active before streaming images
+    DOCKER_READY=0
+    for i in {1..20}; do
+        if docker info >/dev/null 2>&1; then
+            DOCKER_READY=1
+            break
+        fi
+        sleep 1
+    done
+
+    if [[ ${DOCKER_READY} -eq 1 ]]; then
+        log "loading pre-cached Docker images into local container engine..."
+        if docker load -i "${CACHE_TAR}"; then
+            touch "${LOAD_MARKER}"
+            log "pre-cached Docker images successfully loaded"
+        else
+            log "WARNING: docker load failed; will fall back to compose network pull"
+        fi
+    else
+        log "WARNING: docker daemon not responding in time; will fall back to compose network pull"
+    fi
+fi
+
 log "first-boot initialization complete"

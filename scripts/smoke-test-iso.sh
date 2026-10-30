@@ -28,6 +28,7 @@
 #   --timeout N      seconds to wait for the panel     (default: 600)
 #   --mem N          guest RAM in MiB                   (default: 2560)
 #   --smp N          guest vCPUs                        (default: 2)
+#   --test-stack     unmask smolofis-infrastructure and test pre-cached containers
 #
 # Environment:
 #   SERIAL_LOG       path for the captured serial console (default: smoke-serial.log)
@@ -39,6 +40,7 @@ HOST_PORT=8650
 TIMEOUT=600
 MEM=2560
 SMP=2
+TEST_STACK=0
 WORK="$(mktemp -d)"
 SERIAL_LOG="${SERIAL_LOG:-smoke-serial.log}"
 
@@ -48,11 +50,13 @@ die()  { printf '\033[1;31m[smoke] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --iso)     ISO="$2"; shift 2 ;;
-    --port)    HOST_PORT="$2"; shift 2 ;;
-    --timeout) TIMEOUT="$2"; shift 2 ;;
-    --mem)     MEM="$2"; shift 2 ;;
-    --smp)     SMP="$2"; shift 2 ;;
+    --iso)        ISO="$2"; shift 2 ;;
+    --port)       HOST_PORT="$2"; shift 2 ;;
+    --timeout)    TIMEOUT="$2"; shift 2 ;;
+    --mem)        MEM="$2"; shift 2 ;;
+    --smp)        SMP="$2"; shift 2 ;;
+    --test-stack) TEST_STACK=1; shift ;;
+    -h|--help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -h|--help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
@@ -97,8 +101,13 @@ else
 fi
 
 # components: live-boot config; console on ttyS0 so the whole boot lands in the
-# serial log; mask the heavyweight image-pulling unit (see header).
-CMDLINE="boot=live components hostname=smolofis console=ttyS0,115200 systemd.mask=smolofis-infrastructure.service"
+# serial log; optionally unmask compose stack when --test-stack is requested.
+CMDLINE="boot=live components hostname=smolofis console=ttyS0,115200"
+if [[ ${TEST_STACK} -eq 0 ]]; then
+  CMDLINE="${CMDLINE} systemd.mask=smolofis-infrastructure.service"
+else
+  log "unmasking smolofis-infrastructure.service for end-to-end container test"
+fi
 
 log "booting ISO (mem=${MEM}M smp=${SMP}; host port ${HOST_PORT} -> guest :80)"
 : > "$SERIAL_LOG"

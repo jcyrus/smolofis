@@ -95,6 +95,8 @@ Because this project is actively evolving, breaking changes to the configuration
 
 ### Phase 3: The "One-Click" ISO
 - [x] Create a GitHub Actions workflow to compile the full OS image on every main-branch push.
+- [x] Pre-cache core Docker stack images in SquashFS for 100% offline cold boots.
+- [x] Bare-metal interactive installer (`smolofis-install`) for NVMe/SATA internal SSDs.
 - [x] Smoke-test the ISO in QEMU as part of CI (`scripts/smoke-test-iso.sh`) — boots the image headless and asserts the panel serves before any release is published.
 - [ ] Verify the first flashable `.iso` release boots end-to-end on physical hardware.
 

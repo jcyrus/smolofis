@@ -64,6 +64,7 @@ WORK_DIR="${REPO_ROOT}/work"
 VERSION="${SMOLOFIS_VERSION:-0.1.0}"
 OUTPUT=""
 KEEP_WORK=0
+PRECACHE_IMAGES="${SMOLOFIS_PRECACHE_IMAGES:-0}"
 
 usage() { sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
@@ -77,6 +78,8 @@ while [[ $# -gt 0 ]]; do
         --work)     WORK_DIR="$2"; shift 2 ;;
         --version)  VERSION="$2"; shift 2 ;;
         --keep-work) KEEP_WORK=1; shift ;;
+        --precache-images) PRECACHE_IMAGES=1; shift ;;
+        --skip-images|--no-precache-images) PRECACHE_IMAGES=0; shift ;;
         -h|--help)  usage 0 ;;
         *) die "unknown argument: $1 (see --help)" ;;
     esac
@@ -291,6 +294,33 @@ install -o root -g root -m 0600 \
 
 # Persistent storage root (populated by smolofis-firstboot at runtime).
 install -d -m 0755 "${ROOTFS}/var/lib/smolofis"
+
+# Pre-cache core Docker stack images (enabled via --precache-images).
+if [[ ${PRECACHE_IMAGES} -eq 1 ]]; then
+    if ! command -v docker >/dev/null 2>&1; then
+        warn "docker not found on host; skipping container image pre-caching"
+    else
+        log "pre-caching core Docker container images into rootfs..."
+        readonly DOCKER_STACK_IMAGES=(
+            "gitea/gitea:1.22"
+            "gitea/act_runner:latest"
+            "ghcr.io/coollabsio/coolify:latest"
+            "postgres:15-alpine"
+            "redis:7-alpine"
+            "ghcr.io/coollabsio/coolify-realtime:1.0.4"
+        )
+        for img in "${DOCKER_STACK_IMAGES[@]}"; do
+            log "  pulling ${img} (platform: linux/${ARCH})..."
+            docker pull --platform "linux/${ARCH}" "${img}"
+        done
+
+        install -d -m 0755 "${ROOTFS}/usr/share/smolofis"
+        log "  exporting images to ${ROOTFS}/usr/share/smolofis/core-images.tar..."
+        docker save "${DOCKER_STACK_IMAGES[@]}" -o "${ROOTFS}/usr/share/smolofis/core-images.tar"
+        chmod 0644 "${ROOTFS}/usr/share/smolofis/core-images.tar"
+        log "  pre-cached images bundle: $(du -h "${ROOTFS}/usr/share/smolofis/core-images.tar" | cut -f1)"
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # Stage 6 — users & service enablement
