@@ -213,6 +213,22 @@ run_in_chroot "apt-get update && apt-get install -y --no-install-recommends \
     docker-ce docker-ce-cli containerd.io docker-compose-plugin"
 
 # ---------------------------------------------------------------------------
+# Stage 3b — Tailscale Remote Access
+# ---------------------------------------------------------------------------
+log "stage 3b/8: tailscale remote access"
+
+run_in_chroot "curl -fsSL https://pkgs.tailscale.com/stable/debian/${SUITE}.noarmor.gpg \
+    -o /etc/apt/keyrings/tailscale.gpg 2>/dev/null || \
+    curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg \
+    -o /etc/apt/keyrings/tailscale.gpg"
+
+cat > "${ROOTFS}/etc/apt/sources.list.d/tailscale.list" <<EOF
+deb [signed-by=/etc/apt/keyrings/tailscale.gpg] https://pkgs.tailscale.com/stable/debian ${SUITE} main
+EOF
+
+run_in_chroot "apt-get update && apt-get install -y --no-install-recommends tailscale"
+
+# ---------------------------------------------------------------------------
 # Stage 4 — appliance identity
 # ---------------------------------------------------------------------------
 log "stage 4/8: hostname + mDNS identity (smolofis.local)"
@@ -251,7 +267,8 @@ ${ansi_dim}  \s \r on \l${ansi_reset}
   ${ansi_green}panel${ansi_reset}     http://\n.local  --  http://\4
   ${ansi_dim}gitea     http://\4:3000  --  coolify   http://\4:8000
   login     smolofis / smolofis (ssh on port 22)
-  install   sudo smolofis-install (to write appliance to internal disk)${ansi_reset}
+  install   sudo smolofis-install (to write appliance to internal disk)
+  remote    sudo smolofis-tailscale up (zero-config tailscale access)${ansi_reset}
 
 EOF
 chmod 0644 "${ROOTFS}/etc/issue"
@@ -266,6 +283,7 @@ install -o root -g root -m 0755 "${PANEL_BINARY}" "${ROOTFS}/usr/local/bin/smolo
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-firstboot.sh" "${ROOTFS}/usr/local/bin/smolofis-firstboot"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-register-runner.sh" "${ROOTFS}/usr/local/bin/smolofis-register-runner"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-install.sh" "${ROOTFS}/usr/local/bin/smolofis-install"
+install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-tailscale.sh" "${ROOTFS}/usr/local/bin/smolofis-tailscale"
 
 # systemd orchestration units.
 install -o root -g root -m 0644 \
@@ -365,7 +383,8 @@ systemctl --root="${ROOTFS}" enable \
     docker.service \
     NetworkManager.service \
     avahi-daemon.service \
-    ssh.service
+    ssh.service \
+    tailscaled.service
 
 # ---------------------------------------------------------------------------
 # Stage 7 — slim down the rootfs

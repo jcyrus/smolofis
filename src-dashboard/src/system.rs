@@ -87,6 +87,7 @@ pub struct Metrics {
     pub uptime_secs: u64,
     pub load_one: f64,
     pub hostname: String,
+    pub tailscale_ip: Option<String>,
 }
 
 /// Immutable view of the whole appliance, swapped atomically each cycle.
@@ -154,6 +155,18 @@ impl Monitor {
             None => (0, 0),
         };
 
+        let networks = sysinfo::Networks::new_with_refreshed_list();
+        let tailscale_ip = networks.iter().find_map(|(name, data)| {
+            if name == "tailscale0" {
+                data.ip_networks()
+                    .iter()
+                    .find(|net| net.addr.is_ipv4())
+                    .map(|net| net.addr.to_string())
+            } else {
+                None
+            }
+        });
+
         Metrics {
             cpu_percent: self.sys.global_cpu_usage(),
             mem_used: self.sys.used_memory(),
@@ -163,6 +176,7 @@ impl Monitor {
             uptime_secs: System::uptime(),
             load_one: System::load_average().one,
             hostname: System::host_name().unwrap_or_else(|| "smolofis".to_string()),
+            tailscale_ip,
         }
     }
 }

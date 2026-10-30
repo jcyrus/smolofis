@@ -87,6 +87,16 @@ services:
 EOF
 fi
 
+# Tailscale persistent node state track
+install -d -m 0700 "${STATE_ROOT}/tailscale"
+if [[ ! -L /var/lib/tailscale ]]; then
+    if [[ -d /var/lib/tailscale ]]; then
+        cp -a /var/lib/tailscale/* "${STATE_ROOT}/tailscale/" 2>/dev/null || true
+        rm -rf /var/lib/tailscale
+    fi
+    ln -s "${STATE_ROOT}/tailscale" /var/lib/tailscale
+fi
+
 # ---------------------------------------------------------------------------
 # Per-device secrets (generated once, then immutable)
 # ---------------------------------------------------------------------------
@@ -144,6 +154,22 @@ if [[ -f "${CACHE_TAR}" && ! -f "${LOAD_MARKER}" ]]; then
         fi
     else
         log "WARNING: docker daemon not responding in time; will fall back to compose network pull"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Zero-touch Tailscale auto-connect (if key provided via env file)
+# ---------------------------------------------------------------------------
+TAILSCALE_ENV="${CONF_ROOT}/tailscale.env"
+if [[ -f "${TAILSCALE_ENV}" ]]; then
+    # shellcheck disable=SC1090
+    source "${TAILSCALE_ENV}"
+fi
+
+if [[ -n "${TAILSCALE_AUTHKEY:-}" ]]; then
+    log "found TAILSCALE_AUTHKEY; attempting automated Tailscale connection..."
+    if command -v tailscale >/dev/null 2>&1; then
+        tailscale up --authkey="${TAILSCALE_AUTHKEY}" --hostname="smolofis" --ssh --accept-routes 2>&1 | log || true
     fi
 fi
 
