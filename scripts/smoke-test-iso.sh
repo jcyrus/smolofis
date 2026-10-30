@@ -107,6 +107,14 @@ if [[ ${TEST_STACK} -eq 0 ]]; then
   CMDLINE="${CMDLINE} systemd.mask=smolofis-infrastructure.service"
 else
   log "unmasking smolofis-infrastructure.service for end-to-end container test"
+  if (( MEM < 3072 )); then
+    MEM=3584
+  fi
+fi
+
+NET_FORWARDS="hostfwd=tcp:127.0.0.1:${HOST_PORT}-:80"
+if [[ ${TEST_STACK} -eq 1 ]]; then
+  NET_FORWARDS="${NET_FORWARDS},hostfwd=tcp:127.0.0.1:3000-:3000,hostfwd=tcp:127.0.0.1:8000-:8000"
 fi
 
 log "booting ISO (mem=${MEM}M smp=${SMP}; host port ${HOST_PORT} -> guest :80)"
@@ -116,7 +124,7 @@ qemu-system-x86_64 \
   -m "$MEM" -smp "$SMP" \
   -kernel "$KERNEL" -initrd "$INITRD" -append "$CMDLINE" \
   -cdrom "$ISO" \
-  -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:${HOST_PORT}-:80" \
+  -netdev "user,id=net0,${NET_FORWARDS}" \
   -device virtio-net-pci,netdev=net0 \
   -display none -serial "file:${SERIAL_LOG}" -monitor none \
   -no-reboot &
@@ -174,6 +182,60 @@ if [[ "$css_code" == "200" ]]; then
   log "PASS  embedded stylesheet served (HTTP 200)"
 else
   warn "FAIL  /assets/app.css returned HTTP ${css_code}"; fail=1
+fi
+
+if [[ ${TEST_STACK} -eq 1 ]]; then
+  log "waiting up to 180s for pre-cached compose stack to reach operational phase (phase=ready)..."
+  stack_start=$SECONDS
+  stack_deadline=$(( stack_start + 180 ))
+  current_phase=""
+  current_state=""
+  while (( SECONDS < stack_deadline )); do
+    kill -0 "$QEMU_PID" 2>/dev/null || die "QEMU exited unexpectedly while waiting for compose stack"
+    current_state="$(curl -fsS --max-time 3 "${BASE}/api/state" 2>/dev/null || true)"
+    current_phase="$(jq -er '.phase' <<<"$current_state" 2>/dev/null || true)"
+    if [[ "$current_phase" == "ready" ]]; then
+      break
+    fi
+    sleep 4
+  done
+
+  if [[ "$current_phase" == "ready" ]]; then
+    log "PASS  compose stack reached operational state in ~$(( SECONDS - stack_start ))s (phase=ready)"
+
+    docker_status="$(jq -er '.services[] | select(.id=="docker") | .health' <<<"$current_state" 2>/dev/null || true)"
+    gitea_status="$(jq -er '.services[] | select(.id=="gitea") | .health' <<<"$current_state" 2>/dev/null || true)"
+    coolify_status="$(jq -er '.services[] | select(.id=="coolify") | .health' <<<"$current_state" 2>/dev/null || true)"
+
+    if [[ "$docker_status" == "online" ]]; then
+      log "PASS  docker engine probe -> online"
+    else
+      warn "FAIL  docker engine health probe returned: ${docker_status}"; fail=1
+    fi
+
+    if [[ "$gitea_status" == "online" ]]; then
+      log "PASS  gitea health probe -> online"
+    else
+      warn "FAIL  gitea health probe returned: ${gitea_status}"; fail=1
+    fi
+
+    if [[ "$coolify_status" == "online" ]]; then
+      log "PASS  coolify health probe -> online"
+    else
+      warn "FAIL  coolify health probe returned: ${coolify_status}"; fail=1
+    fi
+
+    # Ingress gateway virtual host routing assertion
+    ingress_resp="$(curl -s -o /dev/null -w "%{http_code}" -H "Host: test-app.smolofis.local" "${BASE}/" || true)"
+    if [[ "$ingress_resp" == "502" || "$ingress_resp" == "200" ]]; then
+      log "PASS  ingress gateway routed virtual host (HTTP ${ingress_resp})"
+    else
+      warn "FAIL  unexpected ingress response for virtual host: HTTP ${ingress_resp}"; fail=1
+    fi
+  else
+    warn "FAIL  compose stack timed out waiting for ready (last phase: ${current_phase:-unknown})"
+    fail=1
+  fi
 fi
 
 if (( fail == 0 )); then

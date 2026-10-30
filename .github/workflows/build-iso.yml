@@ -152,12 +152,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             qemu-system-x86 xorriso jq curl
+          if [[ -e /dev/kvm ]]; then
+            sudo chmod 666 /dev/kvm || true
+          fi
 
       - name: Boot the ISO and probe the panel
         run: |
           chmod +x scripts/smoke-test-iso.sh
           scripts/smoke-test-iso.sh \
-            --iso "dist/smolofis-${{ needs.build-iso.outputs.version }}-amd64.iso"
+            --iso "dist/smolofis-${{ needs.build-iso.outputs.version }}-amd64.iso" \
+            --test-stack
 
       - name: Upload guest serial log
         if: always()
