@@ -57,11 +57,20 @@ install -d -m 0755 "${STATE_ROOT}/gitea-runner"
 # Coolify uses UID 9999 (www-data) and GID 0 (root).
 install -d -m 0750 "${STATE_ROOT}/coolify"
 install -d -m 0700 "${STATE_ROOT}/coolify/db"
-install -d -m 0750 "${STATE_ROOT}/coolify/data"
 install -d -m 0700 "${STATE_ROOT}/coolify/ssh"
+install -d -m 0750 "${STATE_ROOT}/coolify/applications"
+install -d -m 0750 "${STATE_ROOT}/coolify/databases"
+install -d -m 0750 "${STATE_ROOT}/coolify/services"
+install -d -m 0750 "${STATE_ROOT}/coolify/backups"
+install -d -m 0750 "${STATE_ROOT}/coolify/images"
 install -d -m 0750 "${STATE_ROOT}/coolify/redis"
 install -d -m 0750 "${STATE_ROOT}/coolify/proxy"
-chown -R 9999:0 "${STATE_ROOT}/coolify/data" "${STATE_ROOT}/coolify/ssh"
+chown -R 9999:0 "${STATE_ROOT}/coolify/ssh" \
+    "${STATE_ROOT}/coolify/applications" \
+    "${STATE_ROOT}/coolify/databases" \
+    "${STATE_ROOT}/coolify/services" \
+    "${STATE_ROOT}/coolify/backups" \
+    "${STATE_ROOT}/coolify/images"
 
 # Ensure /data/coolify on host symlinks to persistent state
 install -d -m 0755 /data

@@ -81,8 +81,14 @@ services:
     volumes:
       # Coolify orchestrates deployments through the host engine.
       - /var/run/docker.sock:/var/run/docker.sock
-      - /var/lib/smolofis/coolify/data:/var/www/html/storage
+      # Mount only the data subdirectories: storage/ itself must stay in the
+      # image, because Laravel needs storage/framework to serve any request.
       - /var/lib/smolofis/coolify/ssh:/var/www/html/storage/app/ssh
+      - /var/lib/smolofis/coolify/applications:/var/www/html/storage/app/applications
+      - /var/lib/smolofis/coolify/databases:/var/www/html/storage/app/databases
+      - /var/lib/smolofis/coolify/services:/var/www/html/storage/app/services
+      - /var/lib/smolofis/coolify/backups:/var/www/html/storage/app/backups
+      - /var/lib/smolofis/coolify/images:/var/www/html/storage/app/images
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/health"]
       interval: 15s
