@@ -183,7 +183,14 @@ run_in_chroot "apt-get install -y --no-install-recommends \
     openssh-server \
     sudo \
     less \
-    htop"
+    htop \
+    parted \
+    dosfstools \
+    e2fsprogs \
+    efibootmgr \
+    grub-efi-amd64-bin \
+    grub-pc-bin \
+    rsync"
 
 # ---------------------------------------------------------------------------
 # Stage 3 — Docker Engine from the official repository
@@ -240,7 +247,8 @@ ${ansi_dim}  \s \r on \l${ansi_reset}
 
   ${ansi_green}panel${ansi_reset}     http://\n.local  --  http://\4
   ${ansi_dim}gitea     http://\4:3000  --  coolify   http://\4:8000
-  login     smolofis / smolofis (ssh on port 22)${ansi_reset}
+  login     smolofis / smolofis (ssh on port 22)
+  install   sudo smolofis-install (to write appliance to internal disk)${ansi_reset}
 
 EOF
 chmod 0644 "${ROOTFS}/etc/issue"
@@ -254,6 +262,7 @@ log "stage 5/8: injecting smolofis payload"
 install -o root -g root -m 0755 "${PANEL_BINARY}" "${ROOTFS}/usr/local/bin/smolofis-panel"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-firstboot.sh" "${ROOTFS}/usr/local/bin/smolofis-firstboot"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-register-runner.sh" "${ROOTFS}/usr/local/bin/smolofis-register-runner"
+install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-install.sh" "${ROOTFS}/usr/local/bin/smolofis-install"
 
 # systemd orchestration units.
 install -o root -g root -m 0644 \

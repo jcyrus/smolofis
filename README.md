@@ -48,16 +48,23 @@ SmolOfis boots headless but provides full local console and SSH access:
 
 ---
 
-## 💾 Data Persistence on Bare Metal
+## 💾 Installing SmolOfis to Internal Disk
 
-When booted as a live ISO, the appliance runs in a temporary RAM filesystem overlay. To persist repositories and deployments across reboots:
+SmolOfis boots as a live image from USB. To permanently install the appliance onto your hardware's internal NVMe or SATA SSD:
 
-1. Create an `ext4` partition on your internal drive (e.g. `/dev/nvme0n1p2` or `/dev/sda2`).
-2. Label it `SMOLOFIS_DATA`:
+1. Boot your machine from the flashed USB stick.
+2. Log in locally or via SSH (`ssh smolofis@smolofis.local`).
+3. Run the interactive disk installer:
    ```bash
-   sudo e2label /dev/nvme0n1p2 SMOLOFIS_DATA
+   sudo smolofis-install
    ```
-3. SmolOfis will automatically discover and mount this partition at `/var/lib/smolofis` on boot.
+4. Select your target drive (e.g. `/dev/nvme0n1`). The installer will automatically format the disk with an EFI bootloader, the immutable system partition, and a persistent `SMOLOFIS_DATA` partition for your Gitea repos and Docker volumes.
+5. Reboot and unplug the USB drive.
+
+For non-interactive or automated provisioning:
+```bash
+sudo smolofis-install --disk /dev/nvme0n1 --yes
+```
 
 ---
 
