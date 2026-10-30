@@ -40,10 +40,12 @@ SmolOfis boots headless but provides full local console and SSH access:
 - **Default Password:** `smolofis` (change immediately via `passwd`)
 - **Privileges:** Passwordless `sudo` rights
 - **SSH Port:** `22` (`ssh smolofis@smolofis.local`)
-- **Port Allocation:**
-  - Panel: `http://smolofis.local` (port `80`)
-  - Gitea: `http://smolofis.local:3000`
-  - Coolify: `http://smolofis.local:8000`
+- **Port & Ingress Allocation:**
+  - Control Panel: `http://smolofis.local` (port `80`)
+  - App Ingress Gateway: Port `80` dynamically forwards non-panel host requests (e.g. `http://*.smolofis.local` or custom domains) to the Coolify Application Proxy on port `8088`.
+  - HTTPS / TLS Ingress: Port `443` (dedicated directly to Coolify's proxy for Let's Encrypt / SSL).
+  - Gitea Web & API: `http://smolofis.local:3000`
+  - Coolify PaaS Console: `http://smolofis.local:8000`
   - Git over SSH: port `2222`
 
 ---

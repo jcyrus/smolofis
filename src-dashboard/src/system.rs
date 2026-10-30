@@ -169,7 +169,7 @@ impl Monitor {
 
 pub struct AppState {
     pub config: Config,
-    http: reqwest::Client,
+    pub http: reqwest::Client,
     snapshot: RwLock<Snapshot>,
     monitor: Mutex<Monitor>,
     /// Latched once all services have been healthy simultaneously; used to
@@ -410,6 +410,7 @@ mod tests {
             poll_interval: Duration::from_secs(3),
             gitea_public_port: 3000,
             coolify_public_port: 8000,
+            app_proxy_url: None,
         }
     }
 

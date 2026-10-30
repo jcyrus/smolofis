@@ -57,7 +57,35 @@ install -d -m 0700 "${STATE_ROOT}/coolify/db"
 install -d -m 0750 "${STATE_ROOT}/coolify/data"
 install -d -m 0700 "${STATE_ROOT}/coolify/ssh"
 install -d -m 0750 "${STATE_ROOT}/coolify/redis"
+install -d -m 0750 "${STATE_ROOT}/coolify/proxy"
 chown -R 9999:0 "${STATE_ROOT}/coolify/data" "${STATE_ROOT}/coolify/ssh"
+
+# Ensure /data/coolify on host symlinks to persistent state
+install -d -m 0755 /data
+if [[ ! -e /data/coolify ]]; then
+    log "linking /data/coolify to persistent storage at ${STATE_ROOT}/coolify"
+    ln -s "${STATE_ROOT}/coolify" /data/coolify
+fi
+
+# Pre-seed non-conflicting Coolify proxy template (maps HTTP to 8088, HTTPS to 443)
+if [[ ! -s "${STATE_ROOT}/coolify/proxy/docker-compose.yml" ]]; then
+    log "provisioning default non-conflicting Coolify proxy template (8088:80, 443:443)..."
+    cat > "${STATE_ROOT}/coolify/proxy/docker-compose.yml" <<'EOF'
+services:
+  traefik:
+    image: traefik:v3.1
+    container_name: coolify-proxy
+    restart: unless-stopped
+    ports:
+      - "8088:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /data/coolify/proxy:/traefik
+    networks:
+      - coolify
+EOF
+fi
 
 # ---------------------------------------------------------------------------
 # Per-device secrets (generated once, then immutable)
