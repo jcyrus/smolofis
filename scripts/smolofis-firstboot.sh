@@ -23,21 +23,24 @@ rand_b64() { head -c "$1" /dev/urandom | base64 | tr -d '\n'; }
 # Storage auto-detection & persistent tracks
 # ---------------------------------------------------------------------------
 # If /var/lib/smolofis is currently unmounted and a partition labeled
-# SMOLOFIS_DATA or persistence exists, mount it automatically.
+# SMOLOFIS_DATA exists (or an unmounted persistence partition), mount it.
 if ! mountpoint -q "${STATE_ROOT}" 2>/dev/null; then
     PERSIST_DEV=""
     if [[ -b /dev/disk/by-label/SMOLOFIS_DATA ]]; then
         PERSIST_DEV="/dev/disk/by-label/SMOLOFIS_DATA"
     elif [[ -b /dev/disk/by-label/persistence ]]; then
-        PERSIST_DEV="/dev/disk/by-label/persistence"
+        # Only attempt direct mount if not already in use by live-boot persistence layer
+        if ! grep -qsE 'persistence|live' /proc/mounts; then
+            PERSIST_DEV="/dev/disk/by-label/persistence"
+        fi
     fi
 
     if [[ -n "${PERSIST_DEV}" ]]; then
         log "mounting persistent data partition (${PERSIST_DEV}) at ${STATE_ROOT}"
         install -d -m 0755 "${STATE_ROOT}"
-        mount "${PERSIST_DEV}" "${STATE_ROOT}"
+        mount "${PERSIST_DEV}" "${STATE_ROOT}" || log "NOTICE: partition ${PERSIST_DEV} already mounted or busy"
     else
-        log "NOTICE: no persistent partition labeled SMOLOFIS_DATA detected; operating in memory/transient mode"
+        log "NOTICE: persistent storage already active or operating in memory mode"
     fi
 fi
 

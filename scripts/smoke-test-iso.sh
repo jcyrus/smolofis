@@ -103,12 +103,28 @@ fi
 # components: live-boot config; console on ttyS0 so the whole boot lands in the
 # serial log; optionally unmask compose stack when --test-stack is requested.
 CMDLINE="boot=live components hostname=smolofis console=ttyS0,115200"
+EXTRA_QEMU_ARGS=()
+
 if [[ ${TEST_STACK} -eq 0 ]]; then
   CMDLINE="${CMDLINE} systemd.mask=smolofis-infrastructure.service"
 else
   log "unmasking smolofis-infrastructure.service for end-to-end container test"
-  if (( MEM < 3072 )); then
+  if (( MEM < 3584 )); then
     MEM=3584
+  fi
+
+  SCRATCH_DISK="${WORK}/persistence.raw"
+  PERSIST_DIR="${WORK}/persist_root"
+  if command -v qemu-img >/dev/null 2>&1 && command -v mkfs.ext4 >/dev/null 2>&1; then
+    log "creating 10GB persistent storage disk for smoke test..."
+    mkdir -p "${PERSIST_DIR}"
+    echo "/ union" > "${PERSIST_DIR}/persistence.conf"
+    qemu-img create -f raw "${SCRATCH_DISK}" 10G >/dev/null
+    mkfs.ext4 -F -q -L "persistence" -d "${PERSIST_DIR}" "${SCRATCH_DISK}"
+    EXTRA_QEMU_ARGS+=(-drive "file=${SCRATCH_DISK},format=raw,if=virtio")
+    CMDLINE="${CMDLINE} persistence"
+  else
+    warn "qemu-img or mkfs.ext4 missing; running without persistent scratch drive"
   fi
 fi
 
@@ -121,6 +137,7 @@ log "booting ISO (mem=${MEM}M smp=${SMP}; host port ${HOST_PORT} -> guest :80)"
 : > "$SERIAL_LOG"
 qemu-system-x86_64 \
   "${ACCEL[@]}" \
+  "${EXTRA_QEMU_ARGS[@]}" \
   -m "$MEM" -smp "$SMP" \
   -kernel "$KERNEL" -initrd "$INITRD" -append "$CMDLINE" \
   -cdrom "$ISO" \
