@@ -6,15 +6,21 @@
 #
 # Secrets (database password, Coolify APP_KEY, ...) are generated once per
 # device by /usr/local/bin/smolofis-firstboot into /etc/smolofis/secrets.env.
+#
+# Traefik is not defined here: it is Coolify's own proxy, started from
+# /data/coolify/proxy/docker-compose.yml so that Coolify can manage it.
 
 name: smolofis
 
 services:
   # ---------------------------------------------------------------- Gitea --
   gitea:
-    image: gitea/gitea:1.22
+    image: gitea/gitea:28.2.0
     container_name: smolofis-gitea
     restart: unless-stopped
+    env_file:
+      # Preset token that lets gitea-runner register itself.
+      - /etc/smolofis/runner.env
     environment:
       USER_UID: "1000"
       USER_GID: "1000"
@@ -23,6 +29,8 @@ services:
       GITEA__server__SSH_PORT: "2222"
       GITEA__service__DISABLE_REGISTRATION: "false"
       GITEA__actions__ENABLED: "true"
+      # Skip the install wizard: the runner cannot register until Gitea is set up.
+      GITEA__security__INSTALL_LOCK: "true"
     ports:
       - "3000:3000"   # web UI + API
       - "2222:22"     # git over ssh
@@ -39,14 +47,20 @@ services:
 
   # ------------------------------------------------- Gitea Actions Runner --
   gitea-runner:
-    image: gitea/act_runner:latest
+    image: gitea/act_runner:0.6.1
     container_name: smolofis-gitea-runner
     restart: unless-stopped
     depends_on:
       gitea:
         condition: service_healthy
+    env_file:
+      - /etc/smolofis/runner.env
     environment:
       GITEA_INSTANCE_URL: "http://gitea:3000"
+      GITEA_RUNNER_NAME: smolofis-runner
+      GITEA_RUNNER_LABELS: "ubuntu-latest:docker://node:22-bookworm,ubuntu-24.04:docker://node:22-bookworm"
+      # Written by smolofis-firstboot; adds the smolofis.local host entry to job
+      # containers so actions/checkout can reach Gitea's ROOT_URL.
       CONFIG_FILE: /data/config.yaml
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -54,7 +68,7 @@ services:
 
   # -------------------------------------------------------------- Coolify --
   coolify:
-    image: ghcr.io/coollabsio/coolify:latest
+    image: docker.io/coollabsio/coolify:4.5.3
     container_name: smolofis-coolify
     restart: unless-stopped
     depends_on:
@@ -62,6 +76,12 @@ services:
         condition: service_healthy
       coolify-redis:
         condition: service_healthy
+    extra_hosts:
+      # Coolify manages this machine over SSH through the Docker host gateway.
+      - host.docker.internal:host-gateway
+    networks:
+      - default
+      - coolify
     env_file:
       - /etc/smolofis/secrets.env
     environment:
@@ -76,8 +96,11 @@ services:
       REDIS_HOST: coolify-redis
       PHP_MEMORY_LIMIT: 256M
       SSL_MODE: "off"
+      PUSHER_BACKEND_PORT: "6001"
     ports:
       - "8000:8080"   # Coolify UI/API
+      - "6001:6001"   # realtime
+      - "6002:6002"   # terminal
     volumes:
       # Coolify orchestrates deployments through the host engine.
       - /var/run/docker.sock:/var/run/docker.sock
@@ -90,7 +113,7 @@ services:
       - /var/lib/smolofis/coolify/backups:/var/www/html/storage/app/backups
       - /var/lib/smolofis/coolify/images:/var/www/html/storage/app/images
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/health"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/api/health && curl -fsS http://localhost:6001/up"]
       interval: 15s
       timeout: 5s
       retries: 20
@@ -127,18 +150,7 @@ services:
       timeout: 5s
       retries: 10
 
-  coolify-realtime:
-    image: ghcr.io/coollabsio/coolify-realtime:1.0.4
-    container_name: smolofis-coolify-realtime
-    restart: unless-stopped
-    depends_on:
-      coolify-redis:
-        condition: service_healthy
-    env_file:
-      - /etc/smolofis/secrets.env
-    environment:
-      REDIS_HOST: coolify-redis
-      REDIS_PORT: "6379"
-    ports:
-      - "6001:6001"
-      - "6002:6002"
+networks:
+  # Shared with coolify-proxy and deployed apps; created by smolofis-firstboot.
+  coolify:
+    external: true

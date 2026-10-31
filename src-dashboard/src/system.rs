@@ -424,7 +424,6 @@ mod tests {
             poll_interval: Duration::from_secs(3),
             gitea_public_port: 3000,
             coolify_public_port: 8000,
-            app_proxy_url: None,
         }
     }
 

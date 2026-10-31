@@ -7,7 +7,8 @@
 #
 #   1. boot the ISO, change the expired default password, run smolofis-install
 #   2. boot the disk with the ISO removed, change the password again
-#   3. reboot, then assert the password and SSH host key both persisted
+#   3. reboot, then assert the password and SSH host key both persisted, and
+#      that Coolify, the Gitea runner and Traefik routing all work
 #
 # Usage:
 #   scripts/install-test-iso.sh --iso dist/smolofis-<ver>-amd64.iso [options]
@@ -19,7 +20,8 @@
 #   --mem N           guest RAM in MiB               (default: 6144)
 #   --smp N           guest vCPUs                    (default: 2)
 #   --ssh-port N      host port for guest :22        (default: 2223)
-#   --panel-port N    host port for guest :80        (default: 8651)
+#   --panel-port N    host port for guest :8090      (default: 8651)
+#   --proxy-port N    host port for guest :80        (default: 8653)
 
 set -euo pipefail
 
@@ -30,6 +32,7 @@ MEM=6144
 SMP=2
 SSH_PORT=2223
 PANEL_PORT=8651
+PROXY_PORT=8653
 WORK="$(mktemp -d)"
 DISK="${WORK}/disk.raw"
 QEMU_PID=""
@@ -50,7 +53,8 @@ while [[ $# -gt 0 ]]; do
     --smp)        SMP="$2"; shift 2 ;;
     --ssh-port)   SSH_PORT="$2"; shift 2 ;;
     --panel-port) PANEL_PORT="$2"; shift 2 ;;
-    -h|--help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --proxy-port) PROXY_PORT="$2"; shift 2 ;;
+    -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
 done
@@ -120,7 +124,7 @@ boot_vm() {
     -m "$MEM" -smp "$SMP" \
     -drive "file=${DISK},format=raw,if=virtio" \
     "$@" \
-    -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22,hostfwd=tcp:127.0.0.1:${PANEL_PORT}-:80" \
+    -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22,hostfwd=tcp:127.0.0.1:${PANEL_PORT}-:8090,hostfwd=tcp:127.0.0.1:${PROXY_PORT}-:80" \
     -device virtio-net-pci,netdev=net0 \
     -display none -serial null -monitor none \
     -no-reboot &
@@ -231,5 +235,36 @@ log "PASS  time sync is running"
 curl -fsS --max-time 10 "http://127.0.0.1:${PANEL_PORT}/healthz" >/dev/null \
   || die "panel did not answer on the installed system"
 log "PASS  panel serves from the installed disk"
+
+deadline=$(( SECONDS + TIMEOUT ))
+until curl -fsS --max-time 5 "http://127.0.0.1:${PANEL_PORT}/api/state" | grep -q '"phase":"ready"'; do
+  (( SECONDS < deadline )) || die "stack did not reach phase=ready on the installed system"
+  sleep 5
+done
+log "PASS  stack is ready on the installed disk"
+
+curl -fsS --max-time 10 -H "Host: unclaimed.example.com" "http://127.0.0.1:${PROXY_PORT}/healthz" | grep -qx ok \
+  || die "Traefik did not route an unclaimed host to the panel"
+log "PASS  Traefik routes port 80 to the panel"
+
+guest "$FINAL_PASSWORD" 'docker run -d --name whoami --network coolify -l traefik.enable=true -l traefik.http.routers.whoami.entrypoints=http -l "traefik.http.routers.whoami.rule=Host(\`whoami.test\`)" traefik/whoami:v1.10' >/dev/null \
+  || die "could not start the routing test app"
+deadline=$(( SECONDS + 30 ))
+until curl -fsS --max-time 5 -H "Host: whoami.test" "http://127.0.0.1:${PROXY_PORT}/" | grep -q '^Hostname:'; do
+  (( SECONDS < deadline )) || die "Traefik did not route to an app on the coolify network"
+  sleep 2
+done
+log "PASS  Traefik routes a Host rule to an app"
+
+guest "$FINAL_PASSWORD" 'docker exec smolofis-coolify sh -c "ssh -i \$(ls /var/www/html/storage/app/ssh/keys/ssh_key@* | grep -v \.lock\$ | head -n 1) -o StrictHostKeyChecking=no -o BatchMode=yes root@host.docker.internal true"' \
+  || die "Coolify could not reach this machine over SSH"
+log "PASS  Coolify can manage this machine over SSH"
+
+deadline=$(( SECONDS + 120 ))
+until guest "$FINAL_PASSWORD" 'docker exec smolofis-gitea-runner test -s /data/.runner'; do
+  (( SECONDS < deadline )) || die "Gitea runner did not register"
+  sleep 5
+done
+log "PASS  Gitea runner registered itself"
 
 log "install test PASSED (${FIRMWARE})"

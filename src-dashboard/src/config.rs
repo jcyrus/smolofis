@@ -11,7 +11,7 @@ use std::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    /// Address the dashboard listens on. Port 80 on the appliance.
+    /// Address the dashboard listens on. Traefik routes port 80 here.
     pub bind_addr: SocketAddr,
     /// Internal base URL used to health-check Gitea.
     pub gitea_url: String,
@@ -29,14 +29,12 @@ pub struct Config {
     pub gitea_public_port: u16,
     /// Port the browser should use to reach Coolify (host-mapped).
     pub coolify_public_port: u16,
-    /// Upstream reverse proxy URL for deployed applications (e.g. Coolify Traefik).
-    pub app_proxy_url: Option<String>,
 }
 
 impl Config {
     pub fn from_env() -> Self {
         Self {
-            bind_addr: env_parsed("SMOLOFIS_BIND", SocketAddr::from(([0, 0, 0, 0], 80))),
+            bind_addr: env_parsed("SMOLOFIS_BIND", SocketAddr::from(([0, 0, 0, 0], 8090))),
             gitea_url: env_or("SMOLOFIS_GITEA_URL", "http://127.0.0.1:3000"),
             gitea_health_path: env_or("SMOLOFIS_GITEA_HEALTH_PATH", "/api/healthz"),
             coolify_url: env_or("SMOLOFIS_COOLIFY_URL", "http://127.0.0.1:8000"),
@@ -45,17 +43,6 @@ impl Config {
             poll_interval: Duration::from_secs(env_parsed("SMOLOFIS_POLL_INTERVAL_SECS", 3u64)),
             gitea_public_port: env_parsed("SMOLOFIS_GITEA_PUBLIC_PORT", 3000u16),
             coolify_public_port: env_parsed("SMOLOFIS_COOLIFY_PUBLIC_PORT", 8000u16),
-            app_proxy_url: match std::env::var("SMOLOFIS_APP_PROXY_URL") {
-                Ok(val) => {
-                    let trimmed = val.trim();
-                    if trimmed.is_empty() || trimmed == "off" || trimmed == "none" {
-                        None
-                    } else {
-                        Some(trimmed.to_string())
-                    }
-                }
-                Err(_) => Some("http://127.0.0.1:8088".to_string()),
-            },
         }
     }
 }

@@ -22,9 +22,6 @@ tokio = { version = "1.38", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-[dev-dependencies]
-tower = { version = "0.5", features = ["util"] }
-
 # Appliance binary: optimize for a small, fully static, fast-starting image.
 [profile.release]
 opt-level = "z"
