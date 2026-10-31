@@ -278,19 +278,27 @@ impl AppState {
         };
     }
 
-    /// Pings the Docker engine over its unix control socket with a raw
-    /// `GET /_ping` — no HTTP client supports unix sockets out of the box,
-    /// and the exchange is trivial enough to speak by hand.
+    /// Checks the Docker engine through systemd on the appliance. In development
+    /// it pings the unix control socket with a raw `GET /_ping` — no HTTP client
+    /// supports unix sockets out of the box, and the exchange is trivial enough
+    /// to speak by hand.
     async fn probe_docker(&self) -> ServiceStatus {
         let started = Instant::now();
-        let (health, detail) = match ping_docker_socket(&self.config.docker_socket).await {
-            Ok(()) => (
-                ServiceHealth::Online,
-                format!(
-                    "engine responding on {}",
-                    self.config.docker_socket.display()
-                ),
-            ),
+        let result = match &self.config.docker_unit {
+            Some(unit) => check_systemd_unit(unit)
+                .await
+                .map(|()| format!("{unit} is active")),
+            None => ping_docker_socket(&self.config.docker_socket)
+                .await
+                .map(|()| {
+                    format!(
+                        "engine responding on {}",
+                        self.config.docker_socket.display()
+                    )
+                }),
+        };
+        let (health, detail) = match result {
+            Ok(detail) => (ServiceHealth::Online, detail),
             Err(reason) => (ServiceHealth::Offline, reason),
         };
         ServiceStatus {
@@ -388,6 +396,22 @@ fn containing_mount<'a>(target: &Path, mounts: impl Iterator<Item = &'a Path>) -
         .max_by_key(|mount| mount.as_os_str().len())
 }
 
+async fn check_systemd_unit(unit: &str) -> Result<(), String> {
+    let query = tokio::process::Command::new("systemctl")
+        .args(["is-active", unit])
+        .output();
+    let output = tokio::time::timeout(Duration::from_secs(2), query)
+        .await
+        .map_err(|_| format!("timed out asking systemd about {unit}"))?
+        .map_err(|e| format!("cannot run systemctl: {e}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let state = String::from_utf8_lossy(&output.stdout);
+        Err(format!("{unit} is {}", state.trim()))
+    }
+}
+
 async fn ping_docker_socket(socket: &Path) -> Result<(), String> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -457,6 +481,7 @@ mod tests {
             coolify_health_path: "/api/health".to_string(),
             data_path: None,
             boot_timeout: Duration::from_secs(900),
+            docker_unit: None,
             docker_socket: PathBuf::from("/nonexistent/smolofis-docker.sock"),
             poll_interval: Duration::from_secs(3),
             gitea_public_port: 3000,
@@ -708,6 +733,12 @@ mod tests {
             err.contains("500"),
             "error should surface the status: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn systemd_check_fails_for_an_unknown_unit() {
+        let result = check_systemd_unit("smolofis-does-not-exist.service").await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]

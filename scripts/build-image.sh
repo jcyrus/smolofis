@@ -201,6 +201,7 @@ run_in_chroot "apt-get install -y --no-install-recommends \
     grub-pc-bin \
     grub2-common \
     iproute2 \
+    nftables \
     rsync"
 
 # ---------------------------------------------------------------------------
@@ -276,6 +277,7 @@ ${ansi_dim}  \s \r on \l${ansi_reset}
   ${ansi_dim}live usb  http://\4:8090 (the panel; the stack runs after install)
   gitea     http://\4:3000  --  coolify   http://\4:8000
   login     smolofis / smolofis (ssh on port 22, change required at first login)
+  admin     sudo smolofis-admin show (gitea and coolify logins)
   install   sudo smolofis-install (to write appliance to internal disk)
   remote    sudo smolofis-tailscale up (zero-config tailscale access)${ansi_reset}
 
@@ -292,6 +294,7 @@ install -o root -g root -m 0755 "${PANEL_BINARY}" "${ROOTFS}/usr/local/bin/smolo
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-firstboot.sh" "${ROOTFS}/usr/local/bin/smolofis-firstboot"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-install.sh" "${ROOTFS}/usr/local/bin/smolofis-install"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-tailscale.sh" "${ROOTFS}/usr/local/bin/smolofis-tailscale"
+install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-admin.sh" "${ROOTFS}/usr/local/bin/smolofis-admin"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-identity.sh" "${ROOTFS}/usr/local/bin/smolofis-identity"
 
 # systemd orchestration units.
@@ -348,9 +351,9 @@ if [[ ${PRECACHE_IMAGES} -eq 1 ]]; then
             "gitea/gitea:28.2.0"
             "gitea/act_runner:0.6.1"
             "docker.io/coollabsio/coolify:4.5.3"
-            "postgres:15-alpine"
-            "redis:7-alpine"
-            "traefik:v3.7"
+            "postgres:15.19-alpine"
+            "redis:7.4.12-alpine"
+            "traefik:v3.7.16"
         )
         for img in "${DOCKER_STACK_IMAGES[@]}"; do
             log "  pulling ${img} (platform: linux/${ARCH})..."
@@ -370,8 +373,7 @@ fi
 # ---------------------------------------------------------------------------
 log "stage 6/8: service user + unit enablement"
 
-run_in_chroot "useradd --system --no-create-home --shell /usr/sbin/nologin smolofis-panel && \
-    usermod -aG docker smolofis-panel"
+run_in_chroot "useradd --system --no-create-home --shell /usr/sbin/nologin smolofis-panel"
 
 # Default operator account for console and SSH access.
 ADMIN_USER="smolofis"
