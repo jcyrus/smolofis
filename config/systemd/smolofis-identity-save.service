@@ -1,0 +1,8 @@
+# Triggered by smolofis-identity-save.path.
+
+[Unit]
+Description=Save the SmolOfis operator password to persistent storage
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/smolofis-identity save

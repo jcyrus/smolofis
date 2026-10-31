@@ -37,7 +37,7 @@ When you power on a machine running SmolOfis, it coordinates initialization grac
 SmolOfis boots headless but provides full local console and SSH access:
 
 - **Default User:** `smolofis`
-- **Default Password:** `smolofis` (change immediately via `passwd`)
+- **Default Password:** `smolofis` (expired: you must choose a new one at first login, and it persists on an installed disk)
 - **Privileges:** Passwordless `sudo` rights
 - **SSH Port:** `22` (`ssh smolofis@smolofis.local`)
 - **Port & Ingress Allocation:**
@@ -60,7 +60,7 @@ SmolOfis boots as a live image from USB. To permanently install the appliance on
    ```bash
    sudo smolofis-install
    ```
-4. Select your target drive (e.g. `/dev/nvme0n1`). The installer will automatically format the disk with an EFI bootloader, the immutable system partition, and a persistent `SMOLOFIS_DATA` partition for your Gitea repos and Docker volumes.
+4. Select your target drive (e.g. `/dev/nvme0n1`). The installer will automatically format the disk with UEFI and legacy BIOS bootloaders, the immutable system partition, and a persistent `SMOLOFIS_DATA` partition for your Gitea repos and Docker volumes.
 5. Reboot and unplug the USB drive.
 
 For non-interactive or automated provisioning:
