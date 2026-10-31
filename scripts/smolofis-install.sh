@@ -31,8 +31,13 @@ MOUNT_DIR="$(mktemp -d -t smolofis-install-XXXXXX)"
 
 cleanup() {
     log "cleaning up mount points..."
-    umount -R "${MOUNT_DIR}" 2>/dev/null || true
-    rm -rf "${MOUNT_DIR}"
+    umount -R "${MOUNT_DIR}/sys" 2>/dev/null || true
+    umount "${MOUNT_DIR}/data" 2>/dev/null || true
+    # rmdir, never rm -rf: if an unmount failed, the installed files are still
+    # reachable through these paths.
+    rmdir "${MOUNT_DIR}/sys" "${MOUNT_DIR}/data" 2>/dev/null || true
+    rmdir "${MOUNT_DIR}" 2>/dev/null \
+        || warn "could not unmount everything under ${MOUNT_DIR}; run sync before rebooting"
 }
 trap cleanup EXIT
 
