@@ -53,18 +53,41 @@ chown -R 1000:1000 "${STATE_ROOT}/gitea"
 
 # Gitea Actions Runner persistent session data.
 install -d -m 0755 "${STATE_ROOT}/gitea-runner"
+if [[ ! -s "${STATE_ROOT}/gitea-runner/config.yaml" ]]; then
+    cat > "${STATE_ROOT}/gitea-runner/config.yaml" <<'EOF'
+runner:
+  file: .runner
+container:
+  options: --add-host=smolofis.local:host-gateway
+EOF
+fi
 
 # Coolify uses UID 9999 (www-data) and GID 0 (root).
 install -d -m 0750 "${STATE_ROOT}/coolify"
 install -d -m 0700 "${STATE_ROOT}/coolify/db"
-install -d -m 0700 "${STATE_ROOT}/coolify/ssh"
+install -d -m 0700 "${STATE_ROOT}/coolify/ssh" "${STATE_ROOT}/coolify/ssh/keys" "${STATE_ROOT}/coolify/ssh/mux"
 install -d -m 0750 "${STATE_ROOT}/coolify/applications"
 install -d -m 0750 "${STATE_ROOT}/coolify/databases"
 install -d -m 0750 "${STATE_ROOT}/coolify/services"
 install -d -m 0750 "${STATE_ROOT}/coolify/backups"
 install -d -m 0750 "${STATE_ROOT}/coolify/images"
 install -d -m 0750 "${STATE_ROOT}/coolify/redis"
-install -d -m 0750 "${STATE_ROOT}/coolify/proxy"
+install -d -m 0750 "${STATE_ROOT}/coolify/proxy" "${STATE_ROOT}/coolify/proxy/dynamic"
+
+# Coolify manages this machine as root over SSH. Its seeder imports any key
+# named for host.docker.internal; /root is on the RAM overlay, so authorize the
+# key on every boot.
+COOLIFY_KEY="${STATE_ROOT}/coolify/ssh/keys/id.root@host.docker.internal"
+if [[ ! -s "${COOLIFY_KEY}" ]]; then
+    log "generating Coolify SSH key for this machine"
+    ssh-keygen -q -t ed25519 -a 100 -N "" -C coolify -f "${COOLIFY_KEY}"
+fi
+install -d -m 0700 /root/.ssh
+touch /root/.ssh/authorized_keys
+chmod 0600 /root/.ssh/authorized_keys
+grep -qxFf "${COOLIFY_KEY}.pub" /root/.ssh/authorized_keys \
+    || cat "${COOLIFY_KEY}.pub" >> /root/.ssh/authorized_keys
+
 chown -R 9999:0 "${STATE_ROOT}/coolify/ssh" \
     "${STATE_ROOT}/coolify/applications" \
     "${STATE_ROOT}/coolify/databases" \
@@ -79,25 +102,79 @@ if [[ ! -e /data/coolify ]]; then
     ln -s "${STATE_ROOT}/coolify" /data/coolify
 fi
 
-# Pre-seed non-conflicting Coolify proxy template (maps HTTP to 8088, HTTPS to 443)
+# Coolify reads this file on first use and manages the proxy from then on, so
+# it is only seeded once and matches Coolify's default Traefik configuration.
 if [[ ! -s "${STATE_ROOT}/coolify/proxy/docker-compose.yml" ]]; then
-    log "provisioning default non-conflicting Coolify proxy template (8088:80, 443:443)..."
+    log "provisioning Coolify proxy (Traefik on ports 80 and 443)"
     cat > "${STATE_ROOT}/coolify/proxy/docker-compose.yml" <<'EOF'
+name: coolify-proxy
+networks:
+  coolify:
+    external: true
 services:
   traefik:
-    image: traefik:v3.1
     container_name: coolify-proxy
+    image: traefik:v3.7
     restart: unless-stopped
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    networks:
+      - coolify
     ports:
-      - "8088:80"
+      - "80:80"
       - "443:443"
+      - "443:443/udp"
+    healthcheck:
+      test: wget -qO- http://localhost:80/ping || exit 1
+      interval: 4s
+      timeout: 2s
+      retries: 5
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /data/coolify/proxy:/traefik
-    networks:
-      - coolify
+    command:
+      - --ping=true
+      - --ping.entrypoint=http
+      - --api.dashboard=true
+      - --api.insecure=false
+      - --entrypoints.http.address=:80
+      - --entrypoints.https.address=:443
+      - --entrypoints.http.http.encodequerysemicolons=true
+      - --entryPoints.http.http2.maxConcurrentStreams=250
+      - --entrypoints.https.http.encodequerysemicolons=true
+      - --entryPoints.https.http2.maxConcurrentStreams=250
+      - --entrypoints.https.http3
+      - --providers.file.directory=/traefik/dynamic/
+      - --providers.file.watch=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=http
+      - --certificatesresolvers.letsencrypt.acme.storage=/traefik/acme.json
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+    labels:
+      - traefik.enable=false
+      - coolify.managed=true
+      - coolify.proxy=true
 EOF
 fi
+
+# Lowest-priority catch-all: IPs, MagicDNS names and renamed mDNS hosts reach
+# the panel, and any app with a Host rule wins. Coolify leaves this file alone.
+cat > "${STATE_ROOT}/coolify/proxy/dynamic/smolofis-panel.yaml" <<'EOF'
+http:
+  routers:
+    smolofis-panel:
+      entryPoints:
+        - http
+      rule: PathPrefix(`/`)
+      priority: 1
+      service: smolofis-panel
+  services:
+    smolofis-panel:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:8090
+EOF
 
 # ---------------------------------------------------------------------------
 # Per-device secrets (generated once, then immutable)
@@ -134,24 +211,37 @@ EOF
     chmod 0600 "${SECRETS_FILE}"
 fi
 
+# Shared by Gitea and its runner, separate from secrets.env so that Gitea does
+# not receive the Coolify credentials.
+RUNNER_ENV="${CONF_ROOT}/runner.env"
+if [[ ! -s "${RUNNER_ENV}" ]]; then
+    log "generating Gitea runner registration token"
+    (umask 077 && printf 'GITEA_RUNNER_REGISTRATION_TOKEN=%s\n' "$(rand_hex 32)" > "${RUNNER_ENV}")
+fi
+
 # ---------------------------------------------------------------------------
 # Pre-cached Docker image ingestion
 # ---------------------------------------------------------------------------
 CACHE_TAR="/usr/share/smolofis/core-images.tar"
 LOAD_MARKER="${STATE_ROOT}/.images-loaded"
 
+DOCKER_READY=0
+for _ in {1..20}; do
+    if docker info >/dev/null 2>&1; then
+        DOCKER_READY=1
+        break
+    fi
+    sleep 1
+done
+
+# Coolify, its proxy and deployed apps share this network.
+if [[ ${DOCKER_READY} -eq 1 ]]; then
+    docker network inspect coolify >/dev/null 2>&1 \
+        || docker network create --attachable coolify >/dev/null
+fi
+
 if [[ -f "${CACHE_TAR}" && ! -f "${LOAD_MARKER}" ]]; then
     log "found pre-cached container image bundle at ${CACHE_TAR}"
-    # Ensure Docker daemon socket is active before streaming images
-    DOCKER_READY=0
-    for i in {1..20}; do
-        if docker info >/dev/null 2>&1; then
-            DOCKER_READY=1
-            break
-        fi
-        sleep 1
-    done
-
     if [[ ${DOCKER_READY} -eq 1 ]]; then
         log "loading pre-cached Docker images into local container engine..."
         if docker load -i "${CACHE_TAR}"; then

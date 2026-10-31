@@ -4,7 +4,7 @@
 #
 # Produces a flashable, BIOS+UEFI hybrid live ISO from a minimal Debian
 # rootfs via debootstrap. The resulting image boots headless, starts the
-# smolofis-panel dashboard on port 80, announces itself as smolofis.local over
+# smolofis-panel dashboard, announces itself as smolofis.local over
 # mDNS, and brings up the Gitea + Coolify docker stack.
 #
 # Pipeline:
@@ -288,7 +288,6 @@ log "stage 5/8: injecting smolofis payload"
 # Control panel binary — root-owned, world-executable, nothing else.
 install -o root -g root -m 0755 "${PANEL_BINARY}" "${ROOTFS}/usr/local/bin/smolofis-panel"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-firstboot.sh" "${ROOTFS}/usr/local/bin/smolofis-firstboot"
-install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-register-runner.sh" "${ROOTFS}/usr/local/bin/smolofis-register-runner"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-install.sh" "${ROOTFS}/usr/local/bin/smolofis-install"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-tailscale.sh" "${ROOTFS}/usr/local/bin/smolofis-tailscale"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-identity.sh" "${ROOTFS}/usr/local/bin/smolofis-identity"
@@ -334,12 +333,12 @@ if [[ ${PRECACHE_IMAGES} -eq 1 ]]; then
     else
         log "pre-caching core Docker container images into rootfs..."
         readonly DOCKER_STACK_IMAGES=(
-            "gitea/gitea:1.22"
-            "gitea/act_runner:latest"
-            "ghcr.io/coollabsio/coolify:latest"
+            "gitea/gitea:28.2.0"
+            "gitea/act_runner:0.6.1"
+            "docker.io/coollabsio/coolify:4.5.3"
             "postgres:15-alpine"
             "redis:7-alpine"
-            "ghcr.io/coollabsio/coolify-realtime:1.0.4"
+            "traefik:v3.7"
         )
         for img in "${DOCKER_STACK_IMAGES[@]}"; do
             log "  pulling ${img} (platform: linux/${ARCH})..."

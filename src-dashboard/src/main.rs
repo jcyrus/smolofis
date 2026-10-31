@@ -7,7 +7,6 @@
 
 mod config;
 mod handlers;
-mod ingress;
 mod system;
 
 use std::sync::Arc;
@@ -43,18 +42,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/healthz", get(handlers::healthz))
         .route("/assets/app.css", get(handlers::asset_css))
         .route("/assets/fonts/{file}", get(handlers::asset_font))
-        .layer(axum::middleware::from_fn_with_state(
-            Arc::clone(&state),
-            ingress::ingress_dispatch,
-        ))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(config.bind_addr)
         .await
         .with_context(|| {
             format!(
-                "failed to bind {} (port 80 needs CAP_NET_BIND_SERVICE; \
-                 set SMOLOFIS_BIND=127.0.0.1:8080 for local development)",
+                "failed to bind {} (set SMOLOFIS_BIND to use another address)",
                 config.bind_addr
             )
         })?;

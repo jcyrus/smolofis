@@ -7,13 +7,13 @@
 # and initrd from the ISO with xorriso and direct-boot them, attaching the ISO
 # itself as a CD-ROM so live-boot finds the squashfs. A console=ttyS0 cmdline
 # streams the whole boot to a serial log, and QEMU user-mode networking
-# forwards a host port to the panel's port 80 so curl can probe it from
+# forwards a host port to the panel's port 8090 so curl can probe it from
 # outside the guest.
 #
 # The Gitea + Coolify compose stack is masked for the test: pulling ~2 GB of
 # images is out of scope for a boot smoke test and would make CI slow and
-# flaky. The panel binds port 80 independently of that stack, which is exactly
-# the "reachable within seconds of boot" guarantee we want to prove.
+# flaky. The panel binds port 8090 independently of that stack, which is
+# exactly the "reachable within seconds of boot" guarantee we want to prove.
 #
 # No root required: xorriso extraction avoids a loop-mount, and the run falls
 # back to TCG software emulation when /dev/kvm is absent (as on GitHub-hosted
@@ -24,7 +24,8 @@
 #
 # Options:
 #   --iso PATH       ISO image to boot                 (required)
-#   --port N         host port forwarded to guest :80  (default: 8650)
+#   --port N         host port forwarded to guest :8090 (default: 8650)
+#   --proxy-port N   host port forwarded to guest :80   (default: 8652)
 #   --timeout N      seconds to wait for the panel     (default: 600)
 #   --mem N          guest RAM in MiB                   (default: 2560)
 #   --smp N          guest vCPUs                        (default: 2)
@@ -37,6 +38,7 @@ set -euo pipefail
 
 ISO=""
 HOST_PORT=8650
+PROXY_PORT=8652
 TIMEOUT=600
 MEM=2560
 SMP=2
@@ -52,12 +54,12 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --iso)        ISO="$2"; shift 2 ;;
     --port)       HOST_PORT="$2"; shift 2 ;;
+    --proxy-port) PROXY_PORT="$2"; shift 2 ;;
     --timeout)    TIMEOUT="$2"; shift 2 ;;
     --mem)        MEM="$2"; shift 2 ;;
     --smp)        SMP="$2"; shift 2 ;;
     --test-stack) TEST_STACK=1; shift ;;
-    -h|--help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    -h|--help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
 done
@@ -147,12 +149,12 @@ EOF
   fi
 fi
 
-NET_FORWARDS="hostfwd=tcp:127.0.0.1:${HOST_PORT}-:80"
+NET_FORWARDS="hostfwd=tcp:127.0.0.1:${HOST_PORT}-:8090"
 if [[ ${TEST_STACK} -eq 1 ]]; then
-  NET_FORWARDS="${NET_FORWARDS},hostfwd=tcp:127.0.0.1:3000-:3000,hostfwd=tcp:127.0.0.1:8000-:8000"
+  NET_FORWARDS="${NET_FORWARDS},hostfwd=tcp:127.0.0.1:${PROXY_PORT}-:80,hostfwd=tcp:127.0.0.1:3000-:3000,hostfwd=tcp:127.0.0.1:8000-:8000"
 fi
 
-log "booting ISO (mem=${MEM}M smp=${SMP}; host port ${HOST_PORT} -> guest :80)"
+log "booting ISO (mem=${MEM}M smp=${SMP}; host port ${HOST_PORT} -> guest :8090)"
 : > "$SERIAL_LOG"
 qemu-system-x86_64 \
   "${ACCEL[@]}" \
@@ -270,12 +272,12 @@ if [[ ${TEST_STACK} -eq 1 ]]; then
       warn "FAIL  coolify health probe returned: ${coolify_status}"; fail=1
     fi
 
-    # Ingress gateway virtual host routing assertion
-    ingress_resp="$(curl -s -o /dev/null -w "%{http_code}" -H "Host: test-app.smolofis.local" "${BASE}/" || true)"
-    if [[ "$ingress_resp" == "502" || "$ingress_resp" == "200" ]]; then
-      log "PASS  ingress gateway routed virtual host (HTTP ${ingress_resp})"
+    # Traefik serves port 80, and an unclaimed host falls through to the panel.
+    proxied="$(curl -fsS --max-time 5 -H "Host: unclaimed.example.com" "http://127.0.0.1:${PROXY_PORT}/healthz" || true)"
+    if [[ "$proxied" == "ok" ]]; then
+      log "PASS  Traefik on port 80 routes to the panel"
     else
-      warn "FAIL  unexpected ingress response for virtual host: HTTP ${ingress_resp}"; fail=1
+      warn "FAIL  Traefik did not reach the panel: ${proxied:-<nothing>}"; fail=1
     fi
   else
     warn "FAIL  compose stack timed out waiting for ready (last phase: ${current_phase:-unknown})"

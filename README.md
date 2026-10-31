@@ -25,9 +25,9 @@ Instead of fighting complex configuration scripts or heavy enterprise monoliths,
 When you power on a machine running SmolOfis, it coordinates initialization gracefully via `systemd`:
 
 1. **Kernel Bootstrap:** The stripped-down kernel boots and brings up core networking targets.
-2. **Instant UI Panel:** A specialized systemd service launches the `smolofis-panel` Rust binary on port `80`. It immediately serves a responsive "System Initializing..." interface.
+2. **Instant UI Panel:** A specialized systemd service launches the `smolofis-panel` Rust binary on port `8090`. It immediately serves a responsive "System Initializing..." interface.
 3. **Daemon Initialization:** Background systemd workers launch the Docker engine and network discovery layers (`avahi-daemon`).
-4. **App Ecosystem Spin-up:** Docker automatically starts pre-configured Gitea, Coolify, Gitea Actions runner, and local storage orchestration layers.
+4. **App Ecosystem Spin-up:** Docker automatically starts Traefik, then the pre-configured Gitea, Coolify and self-registering Gitea Actions runner.
 5. **Dashboard Transition:** The Rust panel polls the core services locally. Once they pass health checks, the UI shifts smoothly to the operational management cockpit.
 
 ---
@@ -41,9 +41,9 @@ SmolOfis boots headless but provides full local console and SSH access:
 - **Privileges:** Passwordless `sudo` rights
 - **SSH Port:** `22` (`ssh smolofis@smolofis.local`)
 - **Port & Ingress Allocation:**
-  - Control Panel: `http://smolofis.local` (port `80`)
-  - App Ingress Gateway: Port `80` dynamically forwards non-panel host requests (e.g. `http://*.smolofis.local` or custom domains) to the Coolify Application Proxy on port `8088`.
-  - HTTPS / TLS Ingress: Port `443` (dedicated directly to Coolify's proxy for Let's Encrypt / SSL).
+  - Control Panel: `http://smolofis.local` (Traefik on port `80`), or directly on port `8090` while the stack starts.
+  - App Ingress: Traefik, managed by Coolify, owns ports `80` and `443`. An app needs a domain that resolves to the appliance, such as a real DNS name or `<app>.<ip>.sslip.io`. mDNS cannot resolve subdomains like `app.smolofis.local`.
+  - Unclaimed hostnames and direct IP access land on the panel.
   - Gitea Web & API: `http://smolofis.local:3000`
   - Coolify PaaS Console: `http://smolofis.local:8000`
   - Git over SSH: port `2222`

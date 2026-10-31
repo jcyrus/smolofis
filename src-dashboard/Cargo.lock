@@ -1344,7 +1344,6 @@ dependencies = [
  "serde_json",
  "sysinfo",
  "tokio",
- "tower",
  "tracing",
  "tracing-subscriber",
 ]

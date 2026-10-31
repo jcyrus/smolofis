@@ -2,10 +2,11 @@
 #
 # Ordered only after network.target so the "Initializing system..." page is
 # reachable within seconds of the kernel handing over to systemd, long before
-# Docker or the application containers exist.
+# Docker or the application containers exist. Traefik routes port 80 here once
+# it is running.
 
 [Unit]
-Description=SmolOfis Control Panel (Rust dashboard on port 80)
+Description=SmolOfis Control Panel (Rust dashboard on port 8090)
 Documentation=https://github.com/jcyrus/smolofis
 After=network.target
 Wants=network.target
@@ -21,14 +22,12 @@ Group=smolofis-panel
 # Read-only access to the engine socket for the /_ping health probe.
 SupplementaryGroups=docker
 
-Environment=SMOLOFIS_BIND=0.0.0.0:80
+Environment=SMOLOFIS_BIND=0.0.0.0:8090
 Environment=SMOLOFIS_GITEA_URL=http://127.0.0.1:3000
 Environment=SMOLOFIS_COOLIFY_URL=http://127.0.0.1:8000
 Environment=RUST_LOG=info
 
-# Bind port 80 without running as root.
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=
 
 # Hardening: the panel only reads telemetry and talks to local sockets.
 NoNewPrivileges=yes
