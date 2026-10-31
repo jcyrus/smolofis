@@ -3,8 +3,8 @@
 # smolofis-install.sh — Bare-metal disk installer for SmolOfis.
 #
 # Wipes and partitions an internal disk (NVMe/SATA/eMMC), installs the
-# immutable appliance system image, provisions GRUB bootloader (UEFI & BIOS),
-# and initializes persistent data storage across reboots.
+# immutable appliance system image, provisions GRUB for both UEFI and legacy
+# BIOS firmware, and initializes persistent data storage across reboots.
 #
 # Usage:
 #   sudo smolofis-install                   # Interactive wizard
@@ -162,12 +162,15 @@ PART_DATA="$(part_path "${TARGET_DISK}" 3)"
 # Partition 1: EFI System Partition (512 MiB)
 # Partition 2: SmolOfis OS System (8 GiB) — holds squashfs and kernels
 # Partition 3: SmolOfis Persistent Data (100% remaining space)
+# Partition 4: BIOS boot (1 MiB) — first on disk; GRUB embeds its core here
 log "partitioning ${TARGET_DISK} (GPT)..."
 parted -s "${TARGET_DISK}" mklabel gpt
-parted -s -a optimal "${TARGET_DISK}" mkpart "ESP" fat32 1MiB 513MiB
+parted -s -a optimal "${TARGET_DISK}" mkpart "ESP" fat32 2MiB 514MiB
 parted -s "${TARGET_DISK}" set 1 esp on
-parted -s -a optimal "${TARGET_DISK}" mkpart "SMOLOFIS_SYS" ext4 513MiB 8705MiB
-parted -s -a optimal "${TARGET_DISK}" mkpart "SMOLOFIS_DATA" ext4 8705MiB 100%
+parted -s -a optimal "${TARGET_DISK}" mkpart "SMOLOFIS_SYS" ext4 514MiB 8706MiB
+parted -s -a optimal "${TARGET_DISK}" mkpart "SMOLOFIS_DATA" ext4 8706MiB 100%
+parted -s -a optimal "${TARGET_DISK}" mkpart "BIOSBOOT" 1MiB 2MiB
+parted -s "${TARGET_DISK}" set 4 bios_grub on
 
 # Re-read partition table
 udevadm settle || sleep 2
@@ -226,23 +229,24 @@ sync
 mkdir -p "${SYS_MNT}/boot/efi"
 mount "${PART_EFI}" "${SYS_MNT}/boot/efi"
 
-if [[ -d /sys/firmware/efi ]]; then
-    log "UEFI firmware detected; installing GRUB x86_64-efi..."
-    grub-install \
-        --target=x86_64-efi \
-        --efi-directory="${SYS_MNT}/boot/efi" \
-        --boot-directory="${SYS_MNT}/boot" \
-        --bootloader-id="SmolOfis" \
-        --removable \
-        --recheck
-else
-    log "legacy BIOS detected; installing GRUB i386-pc to ${TARGET_DISK}..."
-    grub-install \
-        --target=i386-pc \
-        --boot-directory="${SYS_MNT}/boot" \
-        --recheck \
-        "${TARGET_DISK}" || warn "BIOS grub-install had warnings (system will still boot on UEFI)"
-fi
+# Both loaders go on every disk, so it boots whichever way the firmware is set.
+log "installing GRUB for UEFI firmware..."
+grub-install \
+    --target=x86_64-efi \
+    --efi-directory="${SYS_MNT}/boot/efi" \
+    --boot-directory="${SYS_MNT}/boot" \
+    --bootloader-id="SmolOfis" \
+    --removable \
+    --recheck \
+    || die "UEFI grub-install failed; ${TARGET_DISK} will not boot"
+
+log "installing GRUB for legacy BIOS firmware..."
+grub-install \
+    --target=i386-pc \
+    --boot-directory="${SYS_MNT}/boot" \
+    --recheck \
+    "${TARGET_DISK}" \
+    || die "BIOS grub-install failed; ${TARGET_DISK} will not boot"
 
 log "generating GRUB configuration..."
 cat > "${SYS_MNT}/boot/grub/grub.cfg" <<'EOF'

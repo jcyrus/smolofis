@@ -1,0 +1,16 @@
+# SmolOfis device identity — restores SSH host keys and the operator password
+# from persistent storage. sshd cannot start without host keys, and the image
+# deliberately ships none.
+
+[Unit]
+Description=SmolOfis device identity (SSH host keys, operator password)
+Documentation=https://github.com/jcyrus/smolofis
+Before=ssh.service getty.target systemd-user-sessions.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/smolofis-identity restore
+
+[Install]
+WantedBy=ssh.service multi-user.target

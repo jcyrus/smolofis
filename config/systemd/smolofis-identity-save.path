@@ -1,0 +1,12 @@
+# Captures operator password changes as soon as passwd rewrites /etc/shadow,
+# so they survive a reboot or a power cut.
+
+[Unit]
+Description=Watch /etc/shadow for operator password changes
+After=smolofis-identity.service
+
+[Path]
+PathChanged=/etc/shadow
+
+[Install]
+WantedBy=multi-user.target
