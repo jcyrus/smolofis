@@ -20,21 +20,95 @@ rand_hex() { head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 rand_b64() { head -c "$1" /dev/urandom | base64 | tr -d '\n'; }
 
 # ---------------------------------------------------------------------------
-# Persistent storage tracks
+# Storage auto-detection & persistent tracks
 # ---------------------------------------------------------------------------
+# If /var/lib/smolofis is currently unmounted and a partition labeled
+# SMOLOFIS_DATA exists (or an unmounted persistence partition), mount it.
+if ! mountpoint -q "${STATE_ROOT}" 2>/dev/null; then
+    PERSIST_DEV=""
+    if [[ -b /dev/disk/by-label/SMOLOFIS_DATA ]]; then
+        PERSIST_DEV="/dev/disk/by-label/SMOLOFIS_DATA"
+    elif [[ -b /dev/disk/by-label/persistence ]]; then
+        # Only attempt direct mount if not already in use by live-boot persistence layer
+        if ! grep -qsE 'persistence|live' /proc/mounts; then
+            PERSIST_DEV="/dev/disk/by-label/persistence"
+        fi
+    fi
+
+    if [[ -n "${PERSIST_DEV}" ]]; then
+        log "mounting persistent data partition (${PERSIST_DEV}) at ${STATE_ROOT}"
+        install -d -m 0755 "${STATE_ROOT}"
+        mount "${PERSIST_DEV}" "${STATE_ROOT}" || log "NOTICE: partition ${PERSIST_DEV} already mounted or busy"
+    else
+        log "NOTICE: persistent storage already active or operating in memory mode"
+    fi
+fi
+
 log "ensuring persistent storage tracks under ${STATE_ROOT}"
 install -d -m 0755 "${STATE_ROOT}"
+
+# Gitea runs as UID 1000:GID 1000 inside the container.
 install -d -m 0750 "${STATE_ROOT}/gitea"
+chown -R 1000:1000 "${STATE_ROOT}/gitea"
+
+# Gitea Actions Runner persistent session data.
+install -d -m 0755 "${STATE_ROOT}/gitea-runner"
+
+# Coolify uses UID 9999 (www-data) and GID 0 (root).
 install -d -m 0750 "${STATE_ROOT}/coolify"
 install -d -m 0700 "${STATE_ROOT}/coolify/db"
-install -d -m 0750 "${STATE_ROOT}/coolify/data"
 install -d -m 0700 "${STATE_ROOT}/coolify/ssh"
+install -d -m 0750 "${STATE_ROOT}/coolify/applications"
+install -d -m 0750 "${STATE_ROOT}/coolify/databases"
+install -d -m 0750 "${STATE_ROOT}/coolify/services"
+install -d -m 0750 "${STATE_ROOT}/coolify/backups"
+install -d -m 0750 "${STATE_ROOT}/coolify/images"
 install -d -m 0750 "${STATE_ROOT}/coolify/redis"
+install -d -m 0750 "${STATE_ROOT}/coolify/proxy"
+chown -R 9999:0 "${STATE_ROOT}/coolify/ssh" \
+    "${STATE_ROOT}/coolify/applications" \
+    "${STATE_ROOT}/coolify/databases" \
+    "${STATE_ROOT}/coolify/services" \
+    "${STATE_ROOT}/coolify/backups" \
+    "${STATE_ROOT}/coolify/images"
+
+# Ensure /data/coolify on host symlinks to persistent state
+install -d -m 0755 /data
+if [[ ! -e /data/coolify ]]; then
+    log "linking /data/coolify to persistent storage at ${STATE_ROOT}/coolify"
+    ln -s "${STATE_ROOT}/coolify" /data/coolify
+fi
+
+# Pre-seed non-conflicting Coolify proxy template (maps HTTP to 8088, HTTPS to 443)
+if [[ ! -s "${STATE_ROOT}/coolify/proxy/docker-compose.yml" ]]; then
+    log "provisioning default non-conflicting Coolify proxy template (8088:80, 443:443)..."
+    cat > "${STATE_ROOT}/coolify/proxy/docker-compose.yml" <<'EOF'
+services:
+  traefik:
+    image: traefik:v3.1
+    container_name: coolify-proxy
+    restart: unless-stopped
+    ports:
+      - "8088:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /data/coolify/proxy:/traefik
+    networks:
+      - coolify
+EOF
+fi
 
 # ---------------------------------------------------------------------------
 # Per-device secrets (generated once, then immutable)
 # ---------------------------------------------------------------------------
 install -d -m 0755 "${CONF_ROOT}"
+
+# If /etc/smolofis is a fresh persistent bind mount, restore the compose definition from system image
+if [[ ! -s "${CONF_ROOT}/docker-compose.yml" && -f /usr/share/smolofis/docker-compose.yml ]]; then
+    log "restoring docker-compose.yml from /usr/share/smolofis/docker-compose.yml"
+    cp /usr/share/smolofis/docker-compose.yml "${CONF_ROOT}/docker-compose.yml"
+fi
 
 if [[ -s "${SECRETS_FILE}" ]]; then
     log "secrets already provisioned at ${SECRETS_FILE} — leaving untouched"
@@ -58,6 +132,53 @@ PUSHER_APP_KEY=$(rand_hex 16)
 PUSHER_APP_SECRET=$(rand_hex 16)
 EOF
     chmod 0600 "${SECRETS_FILE}"
+fi
+
+# ---------------------------------------------------------------------------
+# Pre-cached Docker image ingestion
+# ---------------------------------------------------------------------------
+CACHE_TAR="/usr/share/smolofis/core-images.tar"
+LOAD_MARKER="${STATE_ROOT}/.images-loaded"
+
+if [[ -f "${CACHE_TAR}" && ! -f "${LOAD_MARKER}" ]]; then
+    log "found pre-cached container image bundle at ${CACHE_TAR}"
+    # Ensure Docker daemon socket is active before streaming images
+    DOCKER_READY=0
+    for i in {1..20}; do
+        if docker info >/dev/null 2>&1; then
+            DOCKER_READY=1
+            break
+        fi
+        sleep 1
+    done
+
+    if [[ ${DOCKER_READY} -eq 1 ]]; then
+        log "loading pre-cached Docker images into local container engine..."
+        if docker load -i "${CACHE_TAR}"; then
+            touch "${LOAD_MARKER}"
+            log "pre-cached Docker images successfully loaded"
+        else
+            log "WARNING: docker load failed; will fall back to compose network pull"
+        fi
+    else
+        log "WARNING: docker daemon not responding in time; will fall back to compose network pull"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Zero-touch Tailscale auto-connect (if key provided via env file)
+# ---------------------------------------------------------------------------
+TAILSCALE_ENV="${CONF_ROOT}/tailscale.env"
+if [[ -f "${TAILSCALE_ENV}" ]]; then
+    # shellcheck disable=SC1090
+    source "${TAILSCALE_ENV}"
+fi
+
+if [[ -n "${TAILSCALE_AUTHKEY:-}" ]]; then
+    log "found TAILSCALE_AUTHKEY; attempting automated Tailscale connection..."
+    if command -v tailscale >/dev/null 2>&1; then
+        tailscale up --authkey="${TAILSCALE_AUTHKEY}" --hostname="smolofis" --ssh --accept-routes 2>&1 | log || true
+    fi
 fi
 
 log "first-boot initialization complete"

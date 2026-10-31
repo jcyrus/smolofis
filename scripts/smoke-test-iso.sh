@@ -28,6 +28,7 @@
 #   --timeout N      seconds to wait for the panel     (default: 600)
 #   --mem N          guest RAM in MiB                   (default: 2560)
 #   --smp N          guest vCPUs                        (default: 2)
+#   --test-stack     unmask smolofis-infrastructure and test pre-cached containers
 #
 # Environment:
 #   SERIAL_LOG       path for the captured serial console (default: smoke-serial.log)
@@ -39,6 +40,7 @@ HOST_PORT=8650
 TIMEOUT=600
 MEM=2560
 SMP=2
+TEST_STACK=0
 WORK="$(mktemp -d)"
 SERIAL_LOG="${SERIAL_LOG:-smoke-serial.log}"
 
@@ -48,11 +50,13 @@ die()  { printf '\033[1;31m[smoke] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --iso)     ISO="$2"; shift 2 ;;
-    --port)    HOST_PORT="$2"; shift 2 ;;
-    --timeout) TIMEOUT="$2"; shift 2 ;;
-    --mem)     MEM="$2"; shift 2 ;;
-    --smp)     SMP="$2"; shift 2 ;;
+    --iso)        ISO="$2"; shift 2 ;;
+    --port)       HOST_PORT="$2"; shift 2 ;;
+    --timeout)    TIMEOUT="$2"; shift 2 ;;
+    --mem)        MEM="$2"; shift 2 ;;
+    --smp)        SMP="$2"; shift 2 ;;
+    --test-stack) TEST_STACK=1; shift ;;
+    -h|--help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -h|--help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
@@ -97,17 +101,66 @@ else
 fi
 
 # components: live-boot config; console on ttyS0 so the whole boot lands in the
-# serial log; mask the heavyweight image-pulling unit (see header).
-CMDLINE="boot=live components hostname=smolofis console=ttyS0,115200 systemd.mask=smolofis-infrastructure.service"
+# serial log; optionally unmask compose stack when --test-stack is requested.
+CMDLINE="boot=live components hostname=smolofis console=ttyS0,115200"
+EXTRA_QEMU_ARGS=()
+
+if [[ ${TEST_STACK} -eq 0 ]]; then
+  CMDLINE="${CMDLINE} systemd.mask=smolofis-infrastructure.service"
+else
+  log "unmasking smolofis-infrastructure.service for end-to-end container test"
+  if (( MEM < 3584 )); then
+    MEM=3584
+  fi
+
+  SCRATCH_DISK="${WORK}/persistence.raw"
+  PERSIST_DIR="${WORK}/persist_root"
+  if command -v qemu-img >/dev/null 2>&1 && command -v mkfs.ext4 >/dev/null 2>&1; then
+    log "creating 10GB persistent storage disk for smoke test..."
+    mkdir -p "${PERSIST_DIR}/var/lib/docker" \
+             "${PERSIST_DIR}/var/lib/containerd" \
+             "${PERSIST_DIR}/var/lib/smolofis" \
+             "${PERSIST_DIR}/var/lib/tailscale" \
+             "${PERSIST_DIR}/etc/smolofis" \
+             "${PERSIST_DIR}/home"
+    chmod 0700 "${PERSIST_DIR}/var/lib/tailscale"
+
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+    if [[ -f "${REPO_ROOT}/config/docker/docker-compose.yml" ]]; then
+      cp "${REPO_ROOT}/config/docker/docker-compose.yml" "${PERSIST_DIR}/etc/smolofis/docker-compose.yml"
+    fi
+    cat > "${PERSIST_DIR}/persistence.conf" <<'EOF'
+/var/lib/docker bind
+/var/lib/containerd bind
+/var/lib/smolofis bind
+/var/lib/tailscale bind
+/etc/smolofis bind
+/home bind
+EOF
+    qemu-img create -f raw "${SCRATCH_DISK}" 10G >/dev/null
+    mkfs.ext4 -F -q -L "persistence" -d "${PERSIST_DIR}" "${SCRATCH_DISK}"
+    EXTRA_QEMU_ARGS+=(-drive "file=${SCRATCH_DISK},format=raw,if=virtio")
+    CMDLINE="${CMDLINE} persistence"
+  else
+    warn "qemu-img or mkfs.ext4 missing; running without persistent scratch drive"
+  fi
+fi
+
+NET_FORWARDS="hostfwd=tcp:127.0.0.1:${HOST_PORT}-:80"
+if [[ ${TEST_STACK} -eq 1 ]]; then
+  NET_FORWARDS="${NET_FORWARDS},hostfwd=tcp:127.0.0.1:3000-:3000,hostfwd=tcp:127.0.0.1:8000-:8000"
+fi
 
 log "booting ISO (mem=${MEM}M smp=${SMP}; host port ${HOST_PORT} -> guest :80)"
 : > "$SERIAL_LOG"
 qemu-system-x86_64 \
   "${ACCEL[@]}" \
+  "${EXTRA_QEMU_ARGS[@]}" \
   -m "$MEM" -smp "$SMP" \
   -kernel "$KERNEL" -initrd "$INITRD" -append "$CMDLINE" \
   -cdrom "$ISO" \
-  -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:${HOST_PORT}-:80" \
+  -netdev "user,id=net0,${NET_FORWARDS}" \
   -device virtio-net-pci,netdev=net0 \
   -display none -serial "file:${SERIAL_LOG}" -monitor none \
   -no-reboot &
@@ -165,6 +218,72 @@ if [[ "$css_code" == "200" ]]; then
   log "PASS  embedded stylesheet served (HTTP 200)"
 else
   warn "FAIL  /assets/app.css returned HTTP ${css_code}"; fail=1
+fi
+
+if [[ ${TEST_STACK} -eq 1 ]]; then
+  stack_timeout=420
+  log "waiting up to ${stack_timeout}s for pre-cached compose stack to reach operational phase (phase=ready)..."
+  stack_start=$SECONDS
+  stack_deadline=$(( stack_start + stack_timeout ))
+  current_phase=""
+  current_state=""
+  last_report=0
+  while (( SECONDS < stack_deadline )); do
+    kill -0 "$QEMU_PID" 2>/dev/null || die "QEMU exited unexpectedly while waiting for compose stack"
+    current_state="$(curl -fsS --max-time 3 "${BASE}/api/state" 2>/dev/null || true)"
+    current_phase="$(jq -er '.phase' <<<"$current_state" 2>/dev/null || true)"
+    if [[ "$current_phase" == "ready" ]]; then
+      break
+    fi
+    if (( SECONDS - last_report >= 15 )); then
+      last_report=$SECONDS
+      d_st="$(jq -r '.services[] | select(.id=="docker") | .health' <<<"$current_state" 2>/dev/null || echo "?")"
+      g_st="$(jq -r '.services[] | select(.id=="gitea") | .health' <<<"$current_state" 2>/dev/null || echo "?")"
+      c_st="$(jq -r '.services[] | select(.id=="coolify") | .health' <<<"$current_state" 2>/dev/null || echo "?")"
+      log "  [+$(( SECONDS - stack_start ))s] phase=${current_phase:-unknown} (docker:${d_st} gitea:${g_st} coolify:${c_st})"
+    fi
+    sleep 4
+  done
+
+  if [[ "$current_phase" == "ready" ]]; then
+    log "PASS  compose stack reached operational state in ~$(( SECONDS - stack_start ))s (phase=ready)"
+
+    docker_status="$(jq -er '.services[] | select(.id=="docker") | .health' <<<"$current_state" 2>/dev/null || true)"
+    gitea_status="$(jq -er '.services[] | select(.id=="gitea") | .health' <<<"$current_state" 2>/dev/null || true)"
+    coolify_status="$(jq -er '.services[] | select(.id=="coolify") | .health' <<<"$current_state" 2>/dev/null || true)"
+
+    if [[ "$docker_status" == "online" ]]; then
+      log "PASS  docker engine probe -> online"
+    else
+      warn "FAIL  docker engine health probe returned: ${docker_status}"; fail=1
+    fi
+
+    if [[ "$gitea_status" == "online" ]]; then
+      log "PASS  gitea health probe -> online"
+    else
+      warn "FAIL  gitea health probe returned: ${gitea_status}"; fail=1
+    fi
+
+    if [[ "$coolify_status" == "online" ]]; then
+      log "PASS  coolify health probe -> online"
+    else
+      warn "FAIL  coolify health probe returned: ${coolify_status}"; fail=1
+    fi
+
+    # Ingress gateway virtual host routing assertion
+    ingress_resp="$(curl -s -o /dev/null -w "%{http_code}" -H "Host: test-app.smolofis.local" "${BASE}/" || true)"
+    if [[ "$ingress_resp" == "502" || "$ingress_resp" == "200" ]]; then
+      log "PASS  ingress gateway routed virtual host (HTTP ${ingress_resp})"
+    else
+      warn "FAIL  unexpected ingress response for virtual host: HTTP ${ingress_resp}"; fail=1
+    fi
+  else
+    warn "FAIL  compose stack timed out waiting for ready (last phase: ${current_phase:-unknown})"
+    if [[ -n "${current_state}" ]]; then
+      warn "last reported state: ${current_state}"
+    fi
+    fail=1
+  fi
 fi
 
 if (( fail == 0 )); then

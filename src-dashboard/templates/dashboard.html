@@ -161,8 +161,12 @@
       <div class="font-display text-2xl font-bold tracking-tight">
         SMOL<span class="wordmark-accent">OFIS</span>
       </div>
-      <div class="hidden text-[11px] uppercase tracking-[0.25em] text-dim sm:block">
-        http://<span id="hostname">{{ hostname }}</span>.local
+      <div class="hidden text-[11px] uppercase tracking-[0.25em] text-dim sm:flex sm:items-center sm:gap-3">
+        <span>http://<span id="hostname">{{ hostname }}</span>.local</span>
+        <span id="ts-badge" class="{% if tailscale_ip.is_none() %}hidden{% endif %} inline-flex items-center gap-1.5 border border-edge px-2 py-0.5 text-signal">
+          <span class="dot rounded-full bg-signal"></span>
+          <span>TS: <span id="ts-ip">{{ tailscale_ip.as_deref().unwrap_or("") }}</span></span>
+        </span>
       </div>
       <div class="ml-auto flex items-center gap-4">
         <span id="phase-pill"
@@ -235,7 +239,7 @@
           <p class="text-[11px] uppercase tracking-[0.2em] text-dim">{{ s.role }}</p>
           <p data-detail class="mt-3 min-h-[2.5rem] text-[12px] leading-5 text-dim">{{ s.detail }}</p>
           {% if s.port != 0 %}
-          <a data-open data-port="{{ s.port }}" href="#"
+          <a data-open data-port="{{ s.port }}" href="http://{{ hostname }}.local:{{ s.port }}/"
              class="mt-4 inline-flex w-max items-center gap-2 border border-edge px-4 py-2 text-[11px] uppercase tracking-[0.25em] text-signal transition-colors hover:bg-signal hover:text-ink">
             open &#x2197;
           </a>
@@ -287,6 +291,14 @@
     setText("m-disk", m.disk_used_h + " / " + m.disk_total_h);
     setText("m-uptime", m.uptime_h);
     setText("hostname", m.hostname);
+    if (m.tailscale_ip) {
+      setText("ts-ip", m.tailscale_ip);
+      var tsBadge = $("ts-badge");
+      if (tsBadge) tsBadge.classList.remove("hidden");
+    } else {
+      var tsBadge = $("ts-badge");
+      if (tsBadge) tsBadge.classList.add("hidden");
+    }
     setBar("bar-cpu", Math.min(100, Math.round(m.cpu_percent)));
     setBar("bar-mem", m.mem_pct);
     setBar("bar-disk", m.disk_pct);

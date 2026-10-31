@@ -87,6 +87,7 @@ pub struct Metrics {
     pub uptime_secs: u64,
     pub load_one: f64,
     pub hostname: String,
+    pub tailscale_ip: Option<String>,
 }
 
 /// Immutable view of the whole appliance, swapped atomically each cycle.
@@ -141,10 +142,29 @@ impl Monitor {
         self.sys.refresh_cpu_usage();
         self.sys.refresh_memory();
 
-        // Sum physical disks; skip pseudo-filesystems sysinfo already hides.
+        // Query the root filesystem directly; avoid summing transient overlay/container mounts.
         let disks = Disks::new_with_refreshed_list();
-        let (disk_total, disk_avail) = disks.list().iter().fold((0u64, 0u64), |(t, a), d| {
-            (t + d.total_space(), a + d.available_space())
+        let primary_disk = disks
+            .list()
+            .iter()
+            .find(|d| d.mount_point() == Path::new("/"))
+            .or_else(|| disks.list().first());
+
+        let (disk_total, disk_avail) = match primary_disk {
+            Some(d) => (d.total_space(), d.available_space()),
+            None => (0, 0),
+        };
+
+        let networks = sysinfo::Networks::new_with_refreshed_list();
+        let tailscale_ip = networks.iter().find_map(|(name, data)| {
+            if name == "tailscale0" {
+                data.ip_networks()
+                    .iter()
+                    .find(|net| net.addr.is_ipv4())
+                    .map(|net| net.addr.to_string())
+            } else {
+                None
+            }
         });
 
         Metrics {
@@ -156,13 +176,14 @@ impl Monitor {
             uptime_secs: System::uptime(),
             load_one: System::load_average().one,
             hostname: System::host_name().unwrap_or_else(|| "smolofis".to_string()),
+            tailscale_ip,
         }
     }
 }
 
 pub struct AppState {
     pub config: Config,
-    http: reqwest::Client,
+    pub http: reqwest::Client,
     snapshot: RwLock<Snapshot>,
     monitor: Mutex<Monitor>,
     /// Latched once all services have been healthy simultaneously; used to
@@ -403,6 +424,7 @@ mod tests {
             poll_interval: Duration::from_secs(3),
             gitea_public_port: 3000,
             coolify_public_port: 8000,
+            app_proxy_url: None,
         }
     }
 

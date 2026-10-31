@@ -79,6 +79,7 @@ struct DashboardTemplate {
     disk_pct: u8,
     uptime: String,
     load_one: String,
+    tailscale_ip: Option<String>,
     services: Vec<ServiceCard>,
 }
 
@@ -101,6 +102,7 @@ pub async fn dashboard(State(state): State<Arc<AppState>>) -> Response {
         disk_pct: pct(m.disk_used, m.disk_total),
         uptime: fmt_uptime(m.uptime_secs),
         load_one: format!("{:.2}", m.load_one),
+        tailscale_ip: m.tailscale_ip.clone(),
         services: service_cards(&state, &snap),
     };
     match template.render() {
@@ -177,6 +179,7 @@ fn api_metrics(m: &Metrics) -> serde_json::Value {
         "uptime_h": fmt_uptime(m.uptime_secs),
         "load_one": m.load_one,
         "hostname": m.hostname,
+        "tailscale_ip": m.tailscale_ip,
     })
 }
 

@@ -29,6 +29,8 @@ pub struct Config {
     pub gitea_public_port: u16,
     /// Port the browser should use to reach Coolify (host-mapped).
     pub coolify_public_port: u16,
+    /// Upstream reverse proxy URL for deployed applications (e.g. Coolify Traefik).
+    pub app_proxy_url: Option<String>,
 }
 
 impl Config {
@@ -43,6 +45,17 @@ impl Config {
             poll_interval: Duration::from_secs(env_parsed("SMOLOFIS_POLL_INTERVAL_SECS", 3u64)),
             gitea_public_port: env_parsed("SMOLOFIS_GITEA_PUBLIC_PORT", 3000u16),
             coolify_public_port: env_parsed("SMOLOFIS_COOLIFY_PUBLIC_PORT", 8000u16),
+            app_proxy_url: match std::env::var("SMOLOFIS_APP_PROXY_URL") {
+                Ok(val) => {
+                    let trimmed = val.trim();
+                    if trimmed.is_empty() || trimmed == "off" || trimmed == "none" {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    }
+                }
+                Err(_) => Some("http://127.0.0.1:8088".to_string()),
+            },
         }
     }
 }

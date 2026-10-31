@@ -113,10 +113,11 @@ jobs:
 
       - name: Build ISO
         run: |
-          chmod +x artifacts/smolofis-panel scripts/build-image.sh scripts/smolofis-firstboot.sh
+          chmod +x artifacts/smolofis-panel scripts/build-image.sh scripts/smolofis-firstboot.sh scripts/smolofis-register-runner.sh scripts/smolofis-install.sh scripts/smolofis-tailscale.sh
           sudo --preserve-env=SMOLOFIS_VERSION scripts/build-image.sh \
             --binary artifacts/smolofis-panel \
             --version "${{ steps.version.outputs.version }}" \
+            --precache-images \
             --output "dist/smolofis-${{ steps.version.outputs.version }}-amd64.iso"
 
       - name: Upload ISO artifact
@@ -150,13 +151,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            qemu-system-x86 xorriso jq curl
+            qemu-system-x86 xorriso jq curl e2fsprogs qemu-utils
+          if [[ -e /dev/kvm ]]; then
+            sudo chmod 666 /dev/kvm || true
+          fi
 
       - name: Boot the ISO and probe the panel
         run: |
           chmod +x scripts/smoke-test-iso.sh
           scripts/smoke-test-iso.sh \
-            --iso "dist/smolofis-${{ needs.build-iso.outputs.version }}-amd64.iso"
+            --iso "dist/smolofis-${{ needs.build-iso.outputs.version }}-amd64.iso" \
+            --test-stack
 
       - name: Upload guest serial log
         if: always()

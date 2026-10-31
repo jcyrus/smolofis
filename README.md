@@ -16,7 +16,7 @@ Instead of fighting complex configuration scripts or heavy enterprise monoliths,
 - **Control Plane:** Compiled Rust binary using `axum` (async web engine), `sysinfo` (telemetry), and `askama` (compiled, type-safe HTML templates) with Tailwind CSS.
 - **Git & CI/CD:** Native Gitea integration paired with Gitea Actions for syntax-compatible GitHub pipeline workflows.
 - **Orchestration (PaaS):** Coolify engine for managing automated branch-based builds, databases, and multi-server deployments.
-- **Networking & Discovery:** Built-in Avahi (`smolofis.local` mDNS resolution) with zero-config DHCP via NetworkManager. Remote access (Tailscale / Cloudflare Tunnel) is on the roadmap.
+- **Networking & Discovery:** Built-in Avahi (`smolofis.local` mDNS resolution) with zero-config DHCP via NetworkManager, and native Tailscale integration for secure mesh remote access.
 
 ---
 
@@ -27,8 +27,70 @@ When you power on a machine running SmolOfis, it coordinates initialization grac
 1. **Kernel Bootstrap:** The stripped-down kernel boots and brings up core networking targets.
 2. **Instant UI Panel:** A specialized systemd service launches the `smolofis-panel` Rust binary on port `80`. It immediately serves a responsive "System Initializing..." interface.
 3. **Daemon Initialization:** Background systemd workers launch the Docker engine and network discovery layers (`avahi-daemon`).
-4. **App Ecosystem Spin-up:** Docker automatically starts pre-configured Gitea, Coolify, and local storage orchestration layers.
+4. **App Ecosystem Spin-up:** Docker automatically starts pre-configured Gitea, Coolify, Gitea Actions runner, and local storage orchestration layers.
 5. **Dashboard Transition:** The Rust panel polls the core services locally. Once they pass health checks, the UI shifts smoothly to the operational management cockpit.
+
+---
+
+## 🔐 Operator Access & Administration
+
+SmolOfis boots headless but provides full local console and SSH access:
+
+- **Default User:** `smolofis`
+- **Default Password:** `smolofis` (change immediately via `passwd`)
+- **Privileges:** Passwordless `sudo` rights
+- **SSH Port:** `22` (`ssh smolofis@smolofis.local`)
+- **Port & Ingress Allocation:**
+  - Control Panel: `http://smolofis.local` (port `80`)
+  - App Ingress Gateway: Port `80` dynamically forwards non-panel host requests (e.g. `http://*.smolofis.local` or custom domains) to the Coolify Application Proxy on port `8088`.
+  - HTTPS / TLS Ingress: Port `443` (dedicated directly to Coolify's proxy for Let's Encrypt / SSL).
+  - Gitea Web & API: `http://smolofis.local:3000`
+  - Coolify PaaS Console: `http://smolofis.local:8000`
+  - Git over SSH: port `2222`
+
+---
+
+## 💾 Installing SmolOfis to Internal Disk
+
+SmolOfis boots as a live image from USB. To permanently install the appliance onto your hardware's internal NVMe or SATA SSD:
+
+1. Boot your machine from the flashed USB stick.
+2. Log in locally or via SSH (`ssh smolofis@smolofis.local`).
+3. Run the interactive disk installer:
+   ```bash
+   sudo smolofis-install
+   ```
+4. Select your target drive (e.g. `/dev/nvme0n1`). The installer will automatically format the disk with an EFI bootloader, the immutable system partition, and a persistent `SMOLOFIS_DATA` partition for your Gitea repos and Docker volumes.
+5. Reboot and unplug the USB drive.
+
+For non-interactive or automated provisioning:
+```bash
+sudo smolofis-install --disk /dev/nvme0n1 --yes
+```
+
+---
+
+## 🌐 Zero-Config Remote Access (Tailscale)
+
+SmolOfis comes with Tailscale pre-installed. You can connect your appliance to your private encrypted mesh network (Tailnet) without opening router ports or configuring dynamic DNS:
+
+1. **Connect to your Tailnet:**
+   ```bash
+   sudo smolofis-tailscale up
+   ```
+   Authenticate via the printed URL in your browser to approve the node.
+
+2. **Access from anywhere:**
+   - **Remote Dashboard:** `http://<tailscale-ip>`
+   - **Remote SSH via Tailscale SSH:** `ssh smolofis@smolofis` (or `ssh smolofis@<tailscale-ip>`)
+   - The dashboard dynamically queries network telemetry and displays your machine's Tailscale IP badge in real time.
+
+3. **Automated / Headless Provisioning:**
+   Place your pre-authenticated auth key in `/etc/smolofis/tailscale.env`:
+   ```bash
+   TAILSCALE_AUTHKEY=tskey-auth-...
+   ```
+   SmolOfis will automatically connect to your Tailnet on boot. Tailscale identity and state are persisted across reboots.
 
 ---
 
@@ -59,13 +121,15 @@ Because this project is actively evolving, breaking changes to the configuration
 
 ### Phase 3: The "One-Click" ISO
 - [x] Create a GitHub Actions workflow to compile the full OS image on every main-branch push.
+- [x] Pre-cache core Docker stack images in SquashFS for 100% offline cold boots.
+- [x] Bare-metal interactive installer (`smolofis-install`) for NVMe/SATA internal SSDs.
 - [x] Smoke-test the ISO in QEMU as part of CI (`scripts/smoke-test-iso.sh`) — boots the image headless and asserts the panel serves before any release is published.
 - [ ] Verify the first flashable `.iso` release boots end-to-end on physical hardware.
 
 ### Phase 4: Hardening & Reach (Planned)
 - [x] Unit tests for the panel's state machine, health probes, and config parsing.
 - [x] Vendor dashboard assets — compiled Tailwind + woff2 fonts embedded in the panel binary; fully offline LANs get the styled UI.
-- [ ] Remote access integrations (Tailscale / Cloudflare Tunnel).
+- [x] Zero-config remote access integrations (Tailscale client, daemon enablement, Tailscale SSH, and live dashboard badge).
 - [ ] Atomic A/B image updates with rollback (immutable-OS style).
 
 ---

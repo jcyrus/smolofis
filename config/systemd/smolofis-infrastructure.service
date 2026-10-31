@@ -26,5 +26,8 @@ ExecStop=/usr/bin/docker compose --project-name smolofis --file /etc/smolofis/do
 TimeoutStartSec=1800
 TimeoutStopSec=120
 
+StandardOutput=journal+console
+StandardError=journal+console
+
 [Install]
 WantedBy=multi-user.target

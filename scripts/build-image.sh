@@ -64,6 +64,7 @@ WORK_DIR="${REPO_ROOT}/work"
 VERSION="${SMOLOFIS_VERSION:-0.1.0}"
 OUTPUT=""
 KEEP_WORK=0
+PRECACHE_IMAGES="${SMOLOFIS_PRECACHE_IMAGES:-0}"
 
 usage() { sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
@@ -77,6 +78,8 @@ while [[ $# -gt 0 ]]; do
         --work)     WORK_DIR="$2"; shift 2 ;;
         --version)  VERSION="$2"; shift 2 ;;
         --keep-work) KEEP_WORK=1; shift ;;
+        --precache-images) PRECACHE_IMAGES=1; shift ;;
+        --skip-images|--no-precache-images) PRECACHE_IMAGES=0; shift ;;
         -h|--help)  usage 0 ;;
         *) die "unknown argument: $1 (see --help)" ;;
     esac
@@ -183,7 +186,14 @@ run_in_chroot "apt-get install -y --no-install-recommends \
     openssh-server \
     sudo \
     less \
-    htop"
+    htop \
+    parted \
+    dosfstools \
+    e2fsprogs \
+    efibootmgr \
+    grub-efi-amd64-bin \
+    grub-pc-bin \
+    rsync"
 
 # ---------------------------------------------------------------------------
 # Stage 3 — Docker Engine from the official repository
@@ -201,6 +211,22 @@ EOF
 
 run_in_chroot "apt-get update && apt-get install -y --no-install-recommends \
     docker-ce docker-ce-cli containerd.io docker-compose-plugin"
+
+# ---------------------------------------------------------------------------
+# Stage 3b — Tailscale Remote Access
+# ---------------------------------------------------------------------------
+log "stage 3b/8: tailscale remote access"
+
+run_in_chroot "curl -fsSL https://pkgs.tailscale.com/stable/debian/${SUITE}.noarmor.gpg \
+    -o /etc/apt/keyrings/tailscale.gpg 2>/dev/null || \
+    curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg \
+    -o /etc/apt/keyrings/tailscale.gpg"
+
+cat > "${ROOTFS}/etc/apt/sources.list.d/tailscale.list" <<EOF
+deb [signed-by=/etc/apt/keyrings/tailscale.gpg] https://pkgs.tailscale.com/stable/debian ${SUITE} main
+EOF
+
+run_in_chroot "apt-get update && apt-get install -y --no-install-recommends tailscale"
 
 # ---------------------------------------------------------------------------
 # Stage 4 — appliance identity
@@ -239,7 +265,10 @@ ${ansi_dim} ------------------------------------------------------${ansi_reset}
 ${ansi_dim}  \s \r on \l${ansi_reset}
 
   ${ansi_green}panel${ansi_reset}     http://\n.local  --  http://\4
-  ${ansi_dim}gitea     http://\4:3000  --  coolify   http://\4:8000${ansi_reset}
+  ${ansi_dim}gitea     http://\4:3000  --  coolify   http://\4:8000
+  login     smolofis / smolofis (ssh on port 22)
+  install   sudo smolofis-install (to write appliance to internal disk)
+  remote    sudo smolofis-tailscale up (zero-config tailscale access)${ansi_reset}
 
 EOF
 chmod 0644 "${ROOTFS}/etc/issue"
@@ -252,6 +281,9 @@ log "stage 5/8: injecting smolofis payload"
 # Control panel binary — root-owned, world-executable, nothing else.
 install -o root -g root -m 0755 "${PANEL_BINARY}" "${ROOTFS}/usr/local/bin/smolofis-panel"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-firstboot.sh" "${ROOTFS}/usr/local/bin/smolofis-firstboot"
+install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-register-runner.sh" "${ROOTFS}/usr/local/bin/smolofis-register-runner"
+install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-install.sh" "${ROOTFS}/usr/local/bin/smolofis-install"
+install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-tailscale.sh" "${ROOTFS}/usr/local/bin/smolofis-tailscale"
 
 # systemd orchestration units.
 install -o root -g root -m 0644 \
@@ -259,10 +291,12 @@ install -o root -g root -m 0644 \
     "${REPO_ROOT}/config/systemd/smolofis-infrastructure.service" \
     "${ROOTFS}/etc/systemd/system/"
 
-# Application stack definition.
-install -d -m 0755 "${ROOTFS}/etc/smolofis"
+# Application stack definition (installed to /etc/smolofis and system backup /usr/share/smolofis).
+install -d -m 0755 "${ROOTFS}/etc/smolofis" "${ROOTFS}/usr/share/smolofis"
 install -o root -g root -m 0644 \
     "${REPO_ROOT}/config/docker/docker-compose.yml" "${ROOTFS}/etc/smolofis/docker-compose.yml"
+install -o root -g root -m 0644 \
+    "${REPO_ROOT}/config/docker/docker-compose.yml" "${ROOTFS}/usr/share/smolofis/docker-compose.yml"
 
 # mDNS / network discovery.
 install -o root -g root -m 0644 \
@@ -280,6 +314,34 @@ install -o root -g root -m 0600 \
 
 # Persistent storage root (populated by smolofis-firstboot at runtime).
 install -d -m 0755 "${ROOTFS}/var/lib/smolofis"
+install -d -m 0700 "${ROOTFS}/var/lib/tailscale"
+
+# Pre-cache core Docker stack images (enabled via --precache-images).
+if [[ ${PRECACHE_IMAGES} -eq 1 ]]; then
+    if ! command -v docker >/dev/null 2>&1; then
+        warn "docker not found on host; skipping container image pre-caching"
+    else
+        log "pre-caching core Docker container images into rootfs..."
+        readonly DOCKER_STACK_IMAGES=(
+            "gitea/gitea:1.22"
+            "gitea/act_runner:latest"
+            "ghcr.io/coollabsio/coolify:latest"
+            "postgres:15-alpine"
+            "redis:7-alpine"
+            "ghcr.io/coollabsio/coolify-realtime:1.0.4"
+        )
+        for img in "${DOCKER_STACK_IMAGES[@]}"; do
+            log "  pulling ${img} (platform: linux/${ARCH})..."
+            docker pull --platform "linux/${ARCH}" "${img}"
+        done
+
+        install -d -m 0755 "${ROOTFS}/usr/share/smolofis"
+        log "  exporting images to ${ROOTFS}/usr/share/smolofis/core-images.tar..."
+        docker save "${DOCKER_STACK_IMAGES[@]}" -o "${ROOTFS}/usr/share/smolofis/core-images.tar"
+        chmod 0644 "${ROOTFS}/usr/share/smolofis/core-images.tar"
+        log "  pre-cached images bundle: $(du -h "${ROOTFS}/usr/share/smolofis/core-images.tar" | cut -f1)"
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # Stage 6 — users & service enablement
@@ -289,6 +351,25 @@ log "stage 6/8: service user + unit enablement"
 run_in_chroot "useradd --system --no-create-home --shell /usr/sbin/nologin smolofis-panel && \
     usermod -aG docker smolofis-panel"
 
+# Default operator account for console and SSH access.
+ADMIN_USER="smolofis"
+ADMIN_PASSWORD="${SMOLOFIS_ADMIN_PASSWORD:-smolofis}"
+run_in_chroot "useradd -m -s /bin/bash -G sudo,docker ${ADMIN_USER} && \
+    echo '${ADMIN_USER}:${ADMIN_PASSWORD}' | chpasswd"
+
+# Grant sudo access without password prompt on the appliance.
+install -d -m 0755 "${ROOTFS}/etc/sudoers.d"
+echo "${ADMIN_USER} ALL=(ALL:ALL) NOPASSWD: ALL" > "${ROOTFS}/etc/sudoers.d/99-smolofis-admin"
+chmod 0440 "${ROOTFS}/etc/sudoers.d/99-smolofis-admin"
+
+# Ensure SSH permits password login for the operator user.
+install -d -m 0755 "${ROOTFS}/etc/ssh/sshd_config.d"
+cat > "${ROOTFS}/etc/ssh/sshd_config.d/smolofis.conf" <<'EOF'
+PasswordAuthentication yes
+KbdInteractiveAuthentication yes
+EOF
+chmod 0644 "${ROOTFS}/etc/ssh/sshd_config.d/smolofis.conf"
+
 # Lock the root account unless the builder explicitly provides a password
 # (useful for debug images: SMOLOFIS_ROOT_PASSWORD=... sudo scripts/build-image.sh ...).
 if [[ -n "${SMOLOFIS_ROOT_PASSWORD:-}" ]]; then
@@ -296,7 +377,7 @@ if [[ -n "${SMOLOFIS_ROOT_PASSWORD:-}" ]]; then
     echo "root:${SMOLOFIS_ROOT_PASSWORD}" | chroot "${ROOTFS}" chpasswd
 else
     run_in_chroot "passwd -l root"
-    log "root account locked (headless appliance; set SMOLOFIS_ROOT_PASSWORD to override)"
+    log "root account locked (operator user '${ADMIN_USER}' is provisioned)"
 fi
 
 systemctl --root="${ROOTFS}" enable \
@@ -305,7 +386,8 @@ systemctl --root="${ROOTFS}" enable \
     docker.service \
     NetworkManager.service \
     avahi-daemon.service \
-    ssh.service
+    ssh.service \
+    tailscaled.service
 
 # ---------------------------------------------------------------------------
 # Stage 7 — slim down the rootfs
