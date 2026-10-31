@@ -225,6 +225,48 @@ ISO_ARGS=(-drive "file=${ISO},if=none,id=usb,media=cdrom,readonly=on" -device id
 # shellcheck disable=SC2054
 BASE_ISO_ARGS=(-drive "file=${BASE_ISO:-$ISO},if=none,id=usb,media=cdrom,readonly=on" -device ide-cd,drive=usb,bootindex=0)
 
+assert_lockdown() {
+  local deadline
+  deadline=$(( SECONDS + 300 ))
+  until guest "$FINAL_PASSWORD" "sudo nft list table inet smolofis" >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      diagnose_guest
+      die "lockdown did not complete"
+    fi
+    sleep 5
+  done
+  if curl -fsS --max-time 5 "http://127.0.0.1:${PANEL_PORT}/healthz" >/dev/null 2>&1; then
+    die "port 8090 is still reachable from the LAN"
+  fi
+  log "PASS  port 8090 is closed to the LAN"
+
+  # The firewall closes first, so the accounts can land a little later.
+  deadline=$(( SECONDS + 300 ))
+  until guest "$FINAL_PASSWORD" "sudo sh -c '. /etc/smolofis/admin.env; curl -fsS -u \"\$SMOLOFIS_ADMIN_USER:\$GITEA_ADMIN_PASSWORD\" http://127.0.0.1:3000/api/v1/user'" 2>/dev/null \
+    | grep -q '"is_admin":true'; do
+    if (( SECONDS >= deadline )); then
+      diagnose_guest
+      die "Gitea admin login failed"
+    fi
+    sleep 5
+  done
+  log "PASS  Gitea admin account works"
+
+  deadline=$(( SECONDS + 300 ))
+  until [[ "$(guest "$FINAL_PASSWORD" "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/register")" != "200" ]]; do
+    if (( SECONDS >= deadline )); then
+      diagnose_guest
+      die "Coolify registration is still open"
+    fi
+    sleep 5
+  done
+  log "PASS  Coolify registration is closed"
+
+  guest "$FINAL_PASSWORD" "sudo smolofis-admin show" | grep -q '^Coolify' || die "smolofis-admin show failed"
+  guest "$FINAL_PASSWORD" "id smolofis-panel" | grep -qv docker || die "panel user is still in the docker group"
+  log "PASS  panel has no Docker access"
+}
+
 diagnose_guest() {
   echo "----- guest diagnostics -----"
   guest "$FINAL_PASSWORD" "ls -la /data/coolify/proxy/dynamic; docker ps -a; \
@@ -346,44 +388,10 @@ until guest "$FINAL_PASSWORD" 'docker exec smolofis-gitea-runner test -s /data/.
 done
 log "PASS  Gitea runner registered itself"
 
-deadline=$(( SECONDS + 300 ))
-until guest "$FINAL_PASSWORD" "sudo nft list table inet smolofis" >/dev/null 2>&1; do
-  if (( SECONDS >= deadline )); then
-    diagnose_guest
-    die "lockdown did not complete"
-  fi
-  sleep 5
-done
-if curl -fsS --max-time 5 "http://127.0.0.1:${PANEL_PORT}/healthz" >/dev/null 2>&1; then
-  die "port 8090 is still reachable from the LAN"
+# A --base-iso build is an older release, so its lockdown is not under test.
+if [[ -z "$BASE_ISO" ]]; then
+  assert_lockdown
 fi
-log "PASS  port 8090 is closed to the LAN"
-
-# The firewall closes first, so the accounts can land a little later.
-deadline=$(( SECONDS + 300 ))
-until guest "$FINAL_PASSWORD" "sudo sh -c '. /etc/smolofis/admin.env; curl -fsS -u \"\$SMOLOFIS_ADMIN_USER:\$GITEA_ADMIN_PASSWORD\" http://127.0.0.1:3000/api/v1/user'" 2>/dev/null \
-  | grep -q '"is_admin":true'; do
-  if (( SECONDS >= deadline )); then
-    diagnose_guest
-    die "Gitea admin login failed"
-  fi
-  sleep 5
-done
-log "PASS  Gitea admin account works"
-
-deadline=$(( SECONDS + 300 ))
-until [[ "$(guest "$FINAL_PASSWORD" "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/register")" != "200" ]]; do
-  if (( SECONDS >= deadline )); then
-    diagnose_guest
-    die "Coolify registration is still open"
-  fi
-  sleep 5
-done
-log "PASS  Coolify registration is closed"
-
-guest "$FINAL_PASSWORD" "sudo smolofis-admin show" | grep -q '^Coolify' || die "smolofis-admin show failed"
-guest "$FINAL_PASSWORD" "id smolofis-panel" | grep -qv docker || die "panel user is still in the docker group"
-log "PASS  panel has no Docker access"
 
 # ---------------------------------------------------------------------------
 # Backup and restore
@@ -485,6 +493,8 @@ booted_slot() {
 wait_ready "before the A/B update"
 
 # These run after the upgrade because --base-iso may predate them.
+assert_lockdown
+
 [[ "$(guest "$FINAL_PASSWORD" "systemctl show -p RuntimeWatchdogUSec --value")" == "30s" ]] \
   || die "the runtime watchdog is not active"
 guest "$FINAL_PASSWORD" "test -e /dev/watchdog0" || die "no watchdog device"

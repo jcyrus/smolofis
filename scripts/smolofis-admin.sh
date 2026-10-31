@@ -92,10 +92,18 @@ provision_coolify() {
 # Traefik reaches the panel through a Docker bridge. Rules are not persisted, so
 # a boot where the stack fails leaves port 8090 open for diagnosis.
 close_panel_port() {
-    [[ "$(docker inspect -f '{{.State.Running}}' coolify-proxy 2>/dev/null || true)" == "true" ]] || {
+    # Coolify recreates the proxy when it first connects, so one look can land in
+    # the gap between its stop and start.
+    local running=""
+    for _ in {1..24}; do
+        running="$(docker inspect -f '{{.State.Running}}' coolify-proxy 2>/dev/null || true)"
+        [[ "${running}" == "true" ]] && break
+        sleep 5
+    done
+    if [[ "${running}" != "true" ]]; then
         log "Traefik is not running; leaving port 8090 open"
         return 0
-    }
+    fi
     log "closing port 8090 to the LAN"
     nft -f - <<'EOF'
 table inet smolofis
