@@ -36,6 +36,9 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(system::AppState::new(config.clone()));
     system::spawn_poller(Arc::clone(&state));
 
+    // TODO: add a panel login. The panel is unauthenticated read-only telemetry,
+    // reachable through Traefik on port 80. Traefik basic auth on its route is the
+    // simplest option; CI reads /api/state and would need credentials.
     let app = Router::new()
         .route("/", get(handlers::dashboard))
         .route("/api/state", get(handlers::api_state))

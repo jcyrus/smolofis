@@ -285,6 +285,7 @@ log "PASS  changed password survived a reboot"
 [[ "$(host_key_fingerprint)" == "$installed_key" ]] || die "SSH host key changed across a reboot"
 log "PASS  SSH host key survived a reboot"
 
+
 guest "$FINAL_PASSWORD" "systemctl is-active systemd-timesyncd" >/dev/null \
   || die "systemd-timesyncd is not running"
 log "PASS  time sync is running"
@@ -382,6 +383,7 @@ backup="$(guest "$FINAL_PASSWORD" "sudo smolofis-backup list" | tail -n 1)"
 [[ -n "$backup" ]] || die "backup was not listed"
 log "PASS  backup created: ${backup}"
 
+
 gitea_api "-X DELETE http://127.0.0.1:3000/api/v1/repos/smolofis/keepme" >/dev/null \
   || die "could not delete the test repository"
 guest "$FINAL_PASSWORD" "sudo smolofis-backup restore ${backup} --yes" >/dev/null || die "restore failed"
@@ -405,6 +407,9 @@ shutdown_vm "$FINAL_PASSWORD"
 boot_vm "live ISO (upgrade)" "${ISO_ARGS[@]}"
 
 change_expired_password "$DEFAULT_PASSWORD" "$LIVE_PASSWORD"
+guest "$LIVE_PASSWORD" "grep -q '<port>8090</port>' /etc/avahi/services/smolofis-panel.service" \
+  || die "the USB image does not advertise the panel on port 8090"
+log "PASS  USB image advertises port 8090 over mDNS"
 guest "$LIVE_PASSWORD" "sudo smolofis-install --upgrade --disk /dev/vda --yes" \
   || die "smolofis-install --upgrade failed"
 log "PASS  upgrade completed from the USB image"
@@ -462,6 +467,29 @@ booted_slot() {
 }
 
 wait_ready "before the A/B update"
+
+# These run after the upgrade because --base-iso may predate them.
+[[ "$(guest "$FINAL_PASSWORD" "systemctl show -p RuntimeWatchdogUSec --value")" == "30s" ]] \
+  || die "the runtime watchdog is not active"
+guest "$FINAL_PASSWORD" "test -e /dev/watchdog0" || die "no watchdog device"
+log "PASS  hang watchdog is active"
+
+guest "$FINAL_PASSWORD" "sudo smolofis-backup push-key | install -D -m 0600 /dev/stdin ~/.ssh/authorized_keys" \
+  || die "could not authorize the backup key"
+guest "$FINAL_PASSWORD" "echo BACKUP_REMOTE=smolofis@127.0.0.1:/home/smolofis/backup-copy | sudo tee /etc/smolofis/backup.env >/dev/null; mkdir -p /home/smolofis/backup-copy; sudo smolofis-backup push" >/dev/null \
+  || die "smolofis-backup push failed"
+guest "$FINAL_PASSWORD" "test -s /home/smolofis/backup-copy/${backup}/gitea.tar.gz; rc=\$?; sudo rm -f /etc/smolofis/backup.env; exit \$rc" \
+  || die "the backup did not reach the remote"
+log "PASS  backup copied off the machine"
+
+guest "$FINAL_PASSWORD" "docker pull -q hello-world:latest >/dev/null && echo hello-world:latest | sudo tee -a /var/lib/smolofis/.images-shipped >/dev/null && sudo smolofis-admin provision >/dev/null" \
+  || die "could not rerun provisioning"
+if guest "$FINAL_PASSWORD" "docker image inspect hello-world:latest" >/dev/null 2>&1; then
+  die "an image from an earlier version was not removed"
+fi
+guest "$FINAL_PASSWORD" "docker image inspect traefik/whoami:v1.10" >/dev/null 2>&1 \
+  || die "pruning removed an image SmolOfis did not ship"
+log "PASS  old shipped images are pruned, and other images are kept"
 
 BUNDLE="${WORK}/bundle"
 mkdir -p "$BUNDLE"

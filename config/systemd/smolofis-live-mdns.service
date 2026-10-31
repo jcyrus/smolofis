@@ -1,0 +1,14 @@
+# Traefik owns port 80 on an installed system, but the USB image never starts
+# it. Advertise the panel's own port there so that network browsers link to it.
+
+[Unit]
+Description=Advertise the panel on port 8090 from the USB image
+ConditionPathIsMountPoint=!/var/lib/smolofis
+Before=avahi-daemon.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/sed -i s#<port>80</port>#<port>8090</port># /etc/avahi/services/smolofis-panel.service
+
+[Install]
+WantedBy=multi-user.target
