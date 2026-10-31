@@ -75,13 +75,16 @@ install -d -m 0750 "${STATE_ROOT}/coolify/redis"
 install -d -m 0750 "${STATE_ROOT}/coolify/proxy" "${STATE_ROOT}/coolify/proxy/dynamic"
 
 # Coolify manages this machine as root over SSH. Its seeder imports any key
-# named for host.docker.internal; /root is on the RAM overlay, so authorize the
-# key on every boot.
-COOLIFY_KEY="${STATE_ROOT}/coolify/ssh/keys/id.root@host.docker.internal"
+# named for host.docker.internal into its database, then keeps its own copy, so
+# the master copy lives outside Coolify's directory and stays stable. /root is
+# on the RAM overlay, so authorize the key on every boot.
+COOLIFY_KEY="${CONF_ROOT}/identity/coolify_ed25519"
+install -d -m 0700 "${CONF_ROOT}/identity"
 if [[ ! -s "${COOLIFY_KEY}" ]]; then
     log "generating Coolify SSH key for this machine"
     ssh-keygen -q -t ed25519 -a 100 -N "" -C coolify -f "${COOLIFY_KEY}"
 fi
+install -m 0600 "${COOLIFY_KEY}" "${STATE_ROOT}/coolify/ssh/keys/id.root@host.docker.internal"
 install -d -m 0700 /root/.ssh
 touch /root/.ssh/authorized_keys
 chmod 0600 /root/.ssh/authorized_keys

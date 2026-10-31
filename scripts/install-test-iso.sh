@@ -256,7 +256,7 @@ until curl -fsS --max-time 5 -H "Host: whoami.test" "http://127.0.0.1:${PROXY_PO
 done
 log "PASS  Traefik routes a Host rule to an app"
 
-guest "$FINAL_PASSWORD" 'docker exec smolofis-coolify ssh -i /var/www/html/storage/app/ssh/keys/id.root@host.docker.internal -o StrictHostKeyChecking=no -o BatchMode=yes root@host.docker.internal true' \
+guest "$FINAL_PASSWORD" 'docker exec smolofis-coolify sh -c "ssh -i /var/www/html/storage/app/ssh/keys/ssh_key@* -o StrictHostKeyChecking=no -o BatchMode=yes root@host.docker.internal true"' \
   || die "Coolify could not reach this machine over SSH"
 log "PASS  Coolify can manage this machine over SSH"
 
