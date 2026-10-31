@@ -161,10 +161,10 @@ host_key_fingerprint() {
     | ssh-keygen -lf - | awk '{print $2}'
 }
 
-# change_expired_password <old> <new>
-change_expired_password() {
+# expired_password_dialog <old> <new>
+expired_password_dialog() {
   OLD="$1" NEW="$2" expect -f - -- "${SSH_OPTS[@]}" smolofis@127.0.0.1 <<'EOF' >/dev/null
-set timeout 60
+set timeout 20
 spawn ssh -tt {*}$argv
 expect -re {[Pp]assword: ?$}
 send "$env(OLD)\r"
@@ -181,6 +181,26 @@ EOF
 # guest <password> <command>
 guest() {
   SSHPASS="$1" sshpass -e ssh "${SSH_OPTS[@]}" smolofis@127.0.0.1 "$2"
+}
+
+# sshd opens before logins are allowed, so a login right after boot can be
+# refused. wait_login <password>
+wait_login() {
+  local deadline=$(( SECONDS + 60 ))
+  until guest "$1" true 2>/dev/null; do
+    (( SECONDS < deadline )) || return 1
+    sleep 3
+  done
+}
+
+# change_expired_password <old> <new>
+change_expired_password() {
+  local deadline=$(( SECONDS + 90 ))
+  until guest "$2" true 2>/dev/null; do
+    (( SECONDS < deadline )) || die "could not change the expired password"
+    expired_password_dialog "$1" "$2" || true
+    sleep 3
+  done
 }
 
 # shutdown_vm <password>
@@ -213,7 +233,7 @@ qemu-img create -f raw "$DISK" 24G >/dev/null
 boot_vm "live ISO" "${BASE_ISO_ARGS[@]}"
 
 change_expired_password "$DEFAULT_PASSWORD" "$LIVE_PASSWORD"
-guest "$LIVE_PASSWORD" true || die "forced password change did not take effect on the live image"
+wait_login "$LIVE_PASSWORD" || die "forced password change did not take effect on the live image"
 log "PASS  default password is expired and must be changed"
 
 deadline=$(( SECONDS + 60 ))
@@ -259,7 +279,7 @@ shutdown_vm "$FINAL_PASSWORD"
 # ---------------------------------------------------------------------------
 boot_vm "installed disk (second boot)"
 
-guest "$FINAL_PASSWORD" true || die "changed password did not survive a reboot"
+wait_login "$FINAL_PASSWORD" || die "changed password did not survive a reboot"
 log "PASS  changed password survived a reboot"
 
 [[ "$(host_key_fingerprint)" == "$installed_key" ]] || die "SSH host key changed across a reboot"
@@ -396,7 +416,7 @@ shutdown_vm "$LIVE_PASSWORD"
 # ---------------------------------------------------------------------------
 boot_vm "installed disk (after upgrade)"
 
-guest "$FINAL_PASSWORD" true || die "the password did not survive the upgrade"
+wait_login "$FINAL_PASSWORD" || die "the password did not survive the upgrade"
 [[ "$(host_key_fingerprint)" == "$installed_key" ]] || die "the SSH host key did not survive the upgrade"
 log "PASS  password and SSH host key survived the upgrade"
 

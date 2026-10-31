@@ -4,6 +4,8 @@
 [Unit]
 Description=Watch /etc/shadow for operator password changes
 After=smolofis-identity.service
+# A password changed before this starts would be lost, so hold logins until then.
+Before=systemd-user-sessions.service
 
 [Path]
 PathChanged=/etc/shadow
