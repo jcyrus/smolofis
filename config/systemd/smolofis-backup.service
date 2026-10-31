@@ -1,0 +1,12 @@
+# Triggered nightly by smolofis-backup.timer. Gitea stops for a short time.
+
+[Unit]
+Description=SmolOfis backup of Gitea, Coolify and device secrets
+Documentation=https://github.com/jcyrus/smolofis
+Requires=docker.service
+After=docker.service smolofis-infrastructure.service
+ConditionPathIsMountPoint=/var/lib/smolofis
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/smolofis-backup run

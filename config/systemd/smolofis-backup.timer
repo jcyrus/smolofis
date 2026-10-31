@@ -1,0 +1,12 @@
+# Persistent catches up after a night the appliance was switched off.
+
+[Unit]
+Description=Nightly SmolOfis backup
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

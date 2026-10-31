@@ -4,6 +4,9 @@
 # All persistent state lives under /var/lib/smolofis/ so the appliance can be
 # re-imaged without losing repositories or deployment data.
 #
+# The image owns this file and restores it on every boot, so an upgrade can
+# change the stack. Local changes go in docker-compose.override.yml, next to it.
+#
 # Secrets (database password, Coolify APP_KEY, ...) are generated once per
 # device by /usr/local/bin/smolofis-firstboot into /etc/smolofis/secrets.env.
 #

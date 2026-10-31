@@ -9,6 +9,7 @@
 # Usage:
 #   sudo smolofis-install                   # Interactive wizard
 #   sudo smolofis-install --disk /dev/nvme0n1 --yes   # Non-interactive
+#   sudo smolofis-install --upgrade --disk /dev/nvme0n1   # Keep data, from a newer USB
 
 set -euo pipefail
 
@@ -26,6 +27,7 @@ die()  { printf '%s[smolofis-install] ERROR:%s %s\n' "${C_ERR}" "${C_OFF}" "$*" 
 
 TARGET_DISK=""
 ASSUME_YES=0
+UPGRADE=0
 SOURCE_DIR=""
 MOUNT_DIR="$(mktemp -d -t smolofis-install-XXXXXX)"
 
@@ -48,11 +50,13 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --disk) TARGET_DISK="$2"; shift 2 ;;
         --source) SOURCE_DIR="$2"; shift 2 ;;
+        --upgrade) UPGRADE=1; shift ;;
         -y|--yes) ASSUME_YES=1; shift ;;
         -h|--help)
             echo "Usage: sudo smolofis-install [OPTIONS]"
             echo "  --disk PATH    Target drive to wipe and install to (e.g. /dev/nvme0n1, /dev/sda)"
             echo "  --source PATH  Custom path to directory containing live {vmlinuz, initrd.img, filesystem.squashfs}"
+            echo "  --upgrade      Replace the system on an installed disk and keep all data"
             echo "  -y, --yes      Skip confirmation prompts"
             exit 0
             ;;
@@ -132,7 +136,16 @@ fi
 # Safety confirmation
 # ---------------------------------------------------------------------------
 DISK_INFO="$(lsblk -d -n -o MODEL,SIZE "${TARGET_DISK}" | xargs)"
-if [[ ${ASSUME_YES} -eq 0 ]]; then
+if [[ ${UPGRADE} -eq 1 ]]; then
+    if [[ ${ASSUME_YES} -eq 0 ]]; then
+        printf '\nThis replaces the system on %s (%s). Your data is kept.\n' "${TARGET_DISK}" "${DISK_INFO}"
+        read -rp "Type 'YES' to upgrade: " CONFIRM
+        if [[ "${CONFIRM}" != "YES" ]]; then
+            log "upgrade cancelled by user"
+            exit 0
+        fi
+    fi
+elif [[ ${ASSUME_YES} -eq 0 ]]; then
     printf '\n%s⚠️  WARNING: ALL DATA ON %s (%s) WILL BE PERMANENTLY ERASED!%s\n' "${C_ERR}" "${TARGET_DISK}" "${DISK_INFO}" "${C_OFF}"
     read -rp "Type 'YES' to proceed with wiping and installing SmolOfis: " CONFIRM
     if [[ "${CONFIRM}" != "YES" ]]; then
@@ -147,6 +160,75 @@ log "commencing installation on ${TARGET_DISK} (${DISK_INFO})"
 for part in $(lsblk -n -l -o NAME "${TARGET_DISK}" | tail -n +2); do
     umount -f "/dev/${part}" 2>/dev/null || true
 done
+
+# ---------------------------------------------------------------------------
+# System image
+# ---------------------------------------------------------------------------
+# Live USBs search disks for /live, so installed systems use another path. That
+# keeps a USB boot from picking up the internal disk instead of itself.
+readonly SLOT="system-a"
+SYS_MNT="${MOUNT_DIR}/sys"
+DATA_MNT="${MOUNT_DIR}/data"
+mkdir -p "${SYS_MNT}" "${DATA_MNT}"
+
+# Copy first and rename after, so a failed copy leaves the current system intact.
+copy_system() {
+    local file
+    log "copying appliance system image (filesystem.squashfs, vmlinuz, initrd.img)..."
+    mkdir -p "${SYS_MNT}/${SLOT}"
+    for file in vmlinuz initrd.img filesystem.squashfs; do
+        cp "${LIVE_SRC}/${file}" "${SYS_MNT}/${SLOT}/${file}.new"
+    done
+    sync
+    for file in vmlinuz initrd.img filesystem.squashfs; do
+        mv -f "${SYS_MNT}/${SLOT}/${file}.new" "${SYS_MNT}/${SLOT}/${file}"
+    done
+}
+
+write_grub_cfg() {
+cat > "${SYS_MNT}/boot/grub/grub.cfg" <<EOF
+set default=0
+set timeout=3
+
+insmod all_video
+insmod gfxterm
+if loadfont unicode; then
+    set gfxmode=1024x768,auto
+    terminal_output gfxterm
+fi
+
+set color_normal=light-green/black
+set color_highlight=black/light-green
+
+search --no-floppy --label --set=root SMOLOFIS_SYS
+
+menuentry "SmolOfis Appliance" {
+    linux  /${SLOT}/vmlinuz boot=live components persistence live-media=/dev/disk/by-label/SMOLOFIS_SYS live-media-path=${SLOT} quiet splash loglevel=3 vga=current hostname=smolofis
+    initrd /${SLOT}/initrd.img
+}
+
+menuentry "SmolOfis Appliance (debug console)" {
+    linux  /${SLOT}/vmlinuz boot=live components persistence live-media=/dev/disk/by-label/SMOLOFIS_SYS live-media-path=${SLOT} hostname=smolofis systemd.log_level=info
+    initrd /${SLOT}/initrd.img
+}
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# Upgrade: replace the system, leave the data partition alone
+# ---------------------------------------------------------------------------
+if [[ ${UPGRADE} -eq 1 ]]; then
+    PART_SYS="$(lsblk -l -n -o PATH,LABEL "${TARGET_DISK}" | awk '$2 == "SMOLOFIS_SYS" { print $1 }')"
+    [[ -n "${PART_SYS}" ]] || die "no SmolOfis system partition on ${TARGET_DISK}"
+    log "upgrading ${TARGET_DISK} (${DISK_INFO})"
+    mount "${PART_SYS}" "${SYS_MNT}"
+    copy_system
+    rm -rf "${SYS_MNT}/live"
+    write_grub_cfg
+    sync
+    log "upgrade completed successfully; remove the USB drive and reboot"
+    exit 0
+fi
 
 # Helper to format partition device path (e.g. /dev/nvme0n1p1 vs /dev/sda1)
 part_path() {
@@ -197,18 +279,10 @@ mkfs.ext4 -F -q -L "persistence" "${PART_DATA}"
 # ---------------------------------------------------------------------------
 # Copying System Payloads
 # ---------------------------------------------------------------------------
-SYS_MNT="${MOUNT_DIR}/sys"
-DATA_MNT="${MOUNT_DIR}/data"
-mkdir -p "${SYS_MNT}" "${DATA_MNT}"
-
 log "mounting system target at ${SYS_MNT}..."
 mount "${PART_SYS}" "${SYS_MNT}"
-mkdir -p "${SYS_MNT}/live" "${SYS_MNT}/boot/grub"
-
-log "copying appliance system image (filesystem.squashfs, vmlinuz, initrd.img)..."
-cp -v "${LIVE_SRC}/vmlinuz" "${SYS_MNT}/live/vmlinuz"
-cp -v "${LIVE_SRC}/initrd.img" "${SYS_MNT}/live/initrd.img"
-cp -v "${LIVE_SRC}/filesystem.squashfs" "${SYS_MNT}/live/filesystem.squashfs"
+mkdir -p "${SYS_MNT}/boot/grub"
+copy_system
 
 # Create marker file for GRUB search
 echo "smolofis-appliance" > "${SYS_MNT}/SMOLOFIS"
@@ -256,32 +330,7 @@ grub-install \
     || die "BIOS grub-install failed; ${TARGET_DISK} will not boot"
 
 log "generating GRUB configuration..."
-cat > "${SYS_MNT}/boot/grub/grub.cfg" <<'EOF'
-set default=0
-set timeout=3
-
-insmod all_video
-insmod gfxterm
-if loadfont unicode; then
-    set gfxmode=1024x768,auto
-    terminal_output gfxterm
-fi
-
-set color_normal=light-green/black
-set color_highlight=black/light-green
-
-search --no-floppy --label --set=root SMOLOFIS_SYS
-
-menuentry "SmolOfis Appliance" {
-    linux  /live/vmlinuz boot=live components persistence live-media=/dev/disk/by-label/SMOLOFIS_SYS quiet splash loglevel=3 vga=current hostname=smolofis
-    initrd /live/initrd.img
-}
-
-menuentry "SmolOfis Appliance (debug console)" {
-    linux  /live/vmlinuz boot=live components persistence live-media=/dev/disk/by-label/SMOLOFIS_SYS hostname=smolofis systemd.log_level=info
-    initrd /live/initrd.img
-}
-EOF
+write_grub_cfg
 
 sync
 log "installation completed successfully!"

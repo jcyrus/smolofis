@@ -252,6 +252,8 @@ ff02::1     ip6-allnodes
 ff02::2     ip6-allrouters
 EOF
 
+echo "${VERSION}" > "${ROOTFS}/etc/smolofis-release"
+
 # Each flashed device must generate its own machine-id on first boot.
 : > "${ROOTFS}/etc/machine-id"
 rm -f "${ROOTFS}/var/lib/dbus/machine-id"
@@ -294,12 +296,15 @@ install -o root -g root -m 0755 "${PANEL_BINARY}" "${ROOTFS}/usr/local/bin/smolo
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-firstboot.sh" "${ROOTFS}/usr/local/bin/smolofis-firstboot"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-install.sh" "${ROOTFS}/usr/local/bin/smolofis-install"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-tailscale.sh" "${ROOTFS}/usr/local/bin/smolofis-tailscale"
+install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-backup.sh" "${ROOTFS}/usr/local/bin/smolofis-backup"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-admin.sh" "${ROOTFS}/usr/local/bin/smolofis-admin"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-identity.sh" "${ROOTFS}/usr/local/bin/smolofis-identity"
 
 # systemd orchestration units.
 install -o root -g root -m 0644 \
     "${REPO_ROOT}/config/systemd/smolofis-tailscale-connect.service" \
+    "${REPO_ROOT}/config/systemd/smolofis-backup.service" \
+    "${REPO_ROOT}/config/systemd/smolofis-backup.timer" \
     "${REPO_ROOT}/config/systemd/smolofis-panel.service" \
     "${REPO_ROOT}/config/systemd/smolofis-infrastructure.service" \
     "${REPO_ROOT}/config/systemd/smolofis-identity.service" \
@@ -411,6 +416,7 @@ systemctl --root="${ROOTFS}" enable \
     smolofis-identity.service \
     smolofis-identity-save.path \
     smolofis-tailscale-connect.service \
+    smolofis-backup.timer \
     systemd-timesyncd.service \
     docker.service \
     NetworkManager.service \
