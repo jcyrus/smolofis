@@ -5,12 +5,15 @@
 # Gitea is stopped briefly so that its SQLite database and repositories are
 # copied consistently, which keeps a restore to a single tar extract. Backups
 # include /etc/smolofis, because Coolify cannot decrypt its database without
-# APP_KEY. They sit on the data partition: copy them off the machine to survive
-# a disk failure.
+# APP_KEY. They sit on the data partition, so to survive a disk failure set
+# BACKUP_REMOTE=user@host:/path in /etc/smolofis/backup.env. Each backup is then
+# copied there over SSH. The target receives secrets, so it must be trusted.
 #
 # Usage:
 #   sudo smolofis-backup run
 #   sudo smolofis-backup list
+#   sudo smolofis-backup push
+#   sudo smolofis-backup push-key
 #   sudo smolofis-backup restore <name> --yes
 
 set -euo pipefail
@@ -18,6 +21,8 @@ set -euo pipefail
 readonly STATE_ROOT="/var/lib/smolofis"
 readonly BACKUP_ROOT="${STATE_ROOT}/backups"
 readonly KEEP=7
+readonly REMOTE_ENV="/etc/smolofis/backup.env"
+readonly PUSH_KEY="/etc/smolofis/identity/backup_ed25519"
 
 log() { printf '[smolofis-backup] %s\n' "$*"; }
 die() { printf '[smolofis-backup] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -51,6 +56,28 @@ run_backup() {
     find "${BACKUP_ROOT}" -mindepth 1 -maxdepth 1 -type d -name '20*' | sort | head -n "-${KEEP}" \
         | xargs -r rm -rf
     log "backup complete: ${name}"
+    if [[ -s "${REMOTE_ENV}" ]]; then
+        run_push
+    fi
+}
+
+ensure_push_key() {
+    [[ -s "${PUSH_KEY}" ]] && return 0
+    install -d -m 0700 "$(dirname "${PUSH_KEY}")"
+    ssh-keygen -q -t ed25519 -N "" -C smolofis-backup -f "${PUSH_KEY}"
+}
+
+# The local copy stays complete, so a failed push never costs a backup.
+run_push() {
+    local remote
+    remote="$(sed -n 's/^BACKUP_REMOTE=//p' "${REMOTE_ENV}" 2>/dev/null || true)"
+    [[ -n "${remote}" ]] || die "set BACKUP_REMOTE=user@host:/path in ${REMOTE_ENV}"
+    ensure_push_key
+    log "copying backups to ${remote}"
+    rsync -a --exclude='.partial-*' \
+        -e "ssh -i ${PUSH_KEY} -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
+        "${BACKUP_ROOT}/" "${remote}/"
+    log "copy complete"
 }
 
 run_restore() {
@@ -88,8 +115,10 @@ case "${1:-}" in
     run) run_backup ;;
     list) find "${BACKUP_ROOT}" -mindepth 1 -maxdepth 1 -type d -name '20*' -printf '%f\n' 2>/dev/null | sort ;;
     restore) run_restore "${2:-}" "${3:-}" ;;
+    push) run_push ;;
+    push-key) ensure_push_key; cat "${PUSH_KEY}.pub" ;;
     *)
-        echo "usage: smolofis-backup run|list|restore <name> --yes" >&2
+        echo "usage: smolofis-backup run|list|push|push-key|restore <name> --yes" >&2
         exit 2
         ;;
 esac

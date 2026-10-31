@@ -123,7 +123,15 @@ sudo smolofis-backup list               # show backups
 sudo smolofis-backup restore <name> --yes
 ```
 
-Backups live on the same disk and contain secrets. Copy them somewhere safe to survive a disk failure.
+Backups live on the same disk, so a disk failure takes them too. To keep a copy elsewhere, put the target in `/etc/smolofis/backup.env` and authorize the appliance's key on it:
+
+```bash
+echo 'BACKUP_REMOTE=user@host:/path' | sudo tee /etc/smolofis/backup.env
+sudo smolofis-backup push-key           # add this public key to the target
+sudo smolofis-backup push               # copy now; nightly backups then copy automatically
+```
+
+Backups contain secrets, so only send them somewhere you trust.
 
 ---
 

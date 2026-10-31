@@ -308,6 +308,7 @@ install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-identity.sh" "${ROOTFS}/
 install -o root -g root -m 0644 \
     "${REPO_ROOT}/config/systemd/smolofis-tailscale-connect.service" \
     "${REPO_ROOT}/config/systemd/smolofis-update-verify.service" \
+    "${REPO_ROOT}/config/systemd/smolofis-live-mdns.service" \
     "${REPO_ROOT}/config/systemd/smolofis-backup.service" \
     "${REPO_ROOT}/config/systemd/smolofis-backup.timer" \
     "${REPO_ROOT}/config/systemd/smolofis-panel.service" \
@@ -316,6 +317,12 @@ install -o root -g root -m 0644 \
     "${REPO_ROOT}/config/systemd/smolofis-identity-save.service" \
     "${REPO_ROOT}/config/systemd/smolofis-identity-save.path" \
     "${ROOTFS}/etc/systemd/system/"
+
+# Recover from hangs. softdog stands in on boards without a hardware watchdog.
+install -d -m 0755 "${ROOTFS}/etc/systemd/system.conf.d" "${ROOTFS}/etc/modules-load.d"
+install -o root -g root -m 0644 \
+    "${REPO_ROOT}/config/system/watchdog.conf" "${ROOTFS}/etc/systemd/system.conf.d/smolofis-watchdog.conf"
+echo softdog > "${ROOTFS}/etc/modules-load.d/smolofis-watchdog.conf"
 
 # Keep container logs from filling the data partition.
 install -d -m 0755 "${ROOTFS}/etc/docker"
@@ -372,6 +379,9 @@ if [[ ${PRECACHE_IMAGES} -eq 1 ]]; then
             "redis:7.4.12-alpine"
             "traefik:v3.7.16"
         )
+        # The record of what this image ships, so a later upgrade can remove
+        # these images without touching anything else on the appliance.
+        printf '%s\n' "${DOCKER_STACK_IMAGES[@]}" > "${ROOTFS}/usr/share/smolofis/images.txt"
         for img in "${DOCKER_STACK_IMAGES[@]}"; do
             log "  pulling ${img} (platform: linux/${ARCH})..."
             docker pull --platform "linux/${ARCH}" "${img}"
@@ -430,6 +440,7 @@ systemctl --root="${ROOTFS}" enable \
     smolofis-tailscale-connect.service \
     smolofis-backup.timer \
     smolofis-update-verify.service \
+    smolofis-live-mdns.service \
     systemd-timesyncd.service \
     docker.service \
     NetworkManager.service \

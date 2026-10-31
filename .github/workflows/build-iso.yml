@@ -318,7 +318,7 @@ jobs:
             | { grep -vFxf current-assets.txt || true; } \
             | xargs -r -n 1 gh release delete-asset nightly --yes
           gh api --method PATCH "repos/${GH_REPO}/git/refs/tags/nightly" -f "sha=${GITHUB_SHA}" -F force=true
-          gh release edit nightly --notes "$(cat <<'EOF'
+          gh release edit nightly --target "${GITHUB_SHA}" --notes "$(cat <<'EOF'
           Rolling build of the `main` branch.
           Flash with: `dd if=smolofis-*.iso of=/dev/sdX bs=4M status=progress conv=fsync`
           Then browse to **http://smolofis.local:8090** and run `sudo smolofis-install`.

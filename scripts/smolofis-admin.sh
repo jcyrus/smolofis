@@ -106,12 +106,28 @@ table inet smolofis {
 EOF
 }
 
+# Removes images shipped by an earlier version and nothing else: a blanket prune
+# would also delete images that stopped apps still need.
+prune_old_images() {
+    local shipped="/usr/share/smolofis/images.txt" record="/var/lib/smolofis/.images-shipped" image
+    [[ -f "${shipped}" ]] || return 0
+    if [[ -f "${record}" ]]; then
+        while read -r image; do
+            grep -qxF "${image}" "${shipped}" && continue
+            log "removing old image ${image}"
+            docker image rm "${image}" >/dev/null 2>&1 || log "keeping ${image}: still in use"
+        done < "${record}"
+    fi
+    cp "${shipped}" "${record}"
+}
+
 case "${1:-}" in
     provision)
         ensure_credentials
         provision_gitea
         provision_coolify
         close_panel_port
+        prune_old_images
         log "lockdown complete"
         ;;
     show)
