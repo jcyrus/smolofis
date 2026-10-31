@@ -430,6 +430,17 @@ wait_ready() {
 
 slot_status() { guest "$FINAL_PASSWORD" "sudo smolofis-update status" | awk -v k="$1" '$1 == k { print $2 }'; }
 
+# sshd opens before logins are allowed, so an early read can come back empty.
+booted_slot() {
+  local deadline=$(( SECONDS + 60 )) slot=""
+  until [[ -n "$slot" ]]; do
+    (( SECONDS < deadline )) || die "could not read the booted slot"
+    slot="$(slot_status booted || true)"
+    [[ -n "$slot" ]] || sleep 3
+  done
+  echo "$slot"
+}
+
 wait_ready "before the A/B update"
 
 BUNDLE="${WORK}/bundle"
@@ -465,7 +476,8 @@ guest "$FINAL_PASSWORD" "$APPLY" >/dev/null || die "smolofis-update apply failed
 shutdown_vm "$FINAL_PASSWORD"
 
 boot_vm "updated slot"
-[[ "$(slot_status booted)" == "system-b" ]] || die "the update did not boot system-b"
+slot="$(booted_slot)"
+[[ "$slot" == "system-b" ]] || die "the update booted ${slot}, not system-b"
 wait_ready "after the A/B update"
 deadline=$(( SECONDS + 120 ))
 until [[ "$(slot_status active)" == "system-b" ]]; do
@@ -475,13 +487,15 @@ done
 log "PASS  update booted and was promoted to the active slot"
 
 guest "$FINAL_PASSWORD" "$APPLY" >/dev/null || die "second smolofis-update apply failed"
-guest "$FINAL_PASSWORD" "sudo mount -o remount,rw /run/live/medium && sudo truncate -s 4096 /run/live/medium/system-a/filesystem.squashfs && sync"
+guest "$FINAL_PASSWORD" "sudo mount -o remount,rw /run/live/medium && sudo truncate -s 4096 /run/live/medium/system-a/filesystem.squashfs && sync" \
+  || die "could not corrupt system-a"
 shutdown_vm "$FINAL_PASSWORD"
 
 # The failed slot panics and reboots, so this boot must allow a reset.
 REBOOT_ARGS=()
 boot_vm "corrupted slot, expecting rollback"
-[[ "$(slot_status booted)" == "system-b" ]] || die "rollback did not return to system-b"
+slot="$(booted_slot)"
+[[ "$slot" == "system-b" ]] || die "rollback booted ${slot}, not system-b"
 log "PASS  a failed update rolled back to the previous slot"
 
 bundle="$(guest "$FINAL_PASSWORD" "sudo smolofis-support" | tail -n 1)"
