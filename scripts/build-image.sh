@@ -347,6 +347,11 @@ install -o root -g root -m 0600 \
 
 # Persistent storage root (populated by smolofis-firstboot at runtime).
 install -d -m 0755 "${ROOTFS}/var/lib/smolofis"
+# Coolify hardcodes /data/coolify. The link ships in the image because Docker
+# restarts containers before smolofis-firstboot runs, and a missing bind source
+# would be created as an empty directory.
+install -d -m 0755 "${ROOTFS}/data"
+ln -s /var/lib/smolofis/coolify "${ROOTFS}/data/coolify"
 install -d -m 0700 "${ROOTFS}/var/lib/tailscale"
 
 # Pre-cache core Docker stack images (enabled via --precache-images).

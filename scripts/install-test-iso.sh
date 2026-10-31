@@ -408,10 +408,22 @@ log "PASS  repository survived the upgrade"
 # ---------------------------------------------------------------------------
 # Stage 6 — signed A/B update and rollback
 # ---------------------------------------------------------------------------
+diagnose_guest() {
+  echo "----- guest diagnostics -----"
+  guest "$FINAL_PASSWORD" "ls -la /data /data/coolify/ /data/coolify/proxy /data/coolify/proxy/dynamic; \
+    sudo systemctl --no-pager status smolofis-infrastructure | tail -n 15; docker ps -a; \
+    docker inspect -f '{{json .Mounts}}' coolify-proxy; docker logs --tail 20 coolify-proxy; \
+    curl -sS --max-time 5 http://127.0.0.1:8090/api/state" 2>&1 || true
+  echo "-----------------------------"
+}
+
 wait_ready() {
   local deadline=$(( SECONDS + TIMEOUT ))
   until curl -fsS --max-time 5 "http://127.0.0.1:${PROXY_PORT}/api/state" | grep -q '"phase":"ready"'; do
-    (( SECONDS < deadline )) || die "stack did not reach phase=ready: $1"
+    if (( SECONDS >= deadline )); then
+      diagnose_guest
+      die "stack did not reach phase=ready: $1"
+    fi
     sleep 5
   done
 }

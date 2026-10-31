@@ -77,13 +77,6 @@ chown 9999:0 "${STATE_ROOT}/coolify/applications" \
     "${STATE_ROOT}/coolify/backups" \
     "${STATE_ROOT}/coolify/images"
 
-# Ensure /data/coolify on host symlinks to persistent state
-install -d -m 0755 /data
-if [[ ! -e /data/coolify ]]; then
-    log "linking /data/coolify to persistent storage at ${STATE_ROOT}/coolify"
-    ln -s "${STATE_ROOT}/coolify" /data/coolify
-fi
-
 # Coolify reads this file on first use and manages the proxy from then on, so
 # it is only seeded once and matches Coolify's default Traefik configuration.
 if [[ ! -s "${STATE_ROOT}/coolify/proxy/docker-compose.yml" ]]; then
