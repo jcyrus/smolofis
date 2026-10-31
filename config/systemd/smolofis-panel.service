@@ -19,13 +19,13 @@ RestartSec=2
 
 User=smolofis-panel
 Group=smolofis-panel
-# Read-only access to the engine socket for the /_ping health probe.
-SupplementaryGroups=docker
 
 Environment=SMOLOFIS_BIND=0.0.0.0:8090
 Environment=SMOLOFIS_GITEA_URL=http://127.0.0.1:3000
 Environment=SMOLOFIS_COOLIFY_URL=http://127.0.0.1:8000
 Environment=SMOLOFIS_DATA_PATH=/var/lib/smolofis
+# Asks systemd, because the Docker socket would be root-equivalent access.
+Environment=SMOLOFIS_DOCKER_UNIT=docker.service
 Environment=RUST_LOG=info
 
 CapabilityBoundingSet=

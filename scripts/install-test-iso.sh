@@ -244,18 +244,14 @@ guest "$FINAL_PASSWORD" "systemctl is-active systemd-timesyncd" >/dev/null \
   || die "systemd-timesyncd is not running"
 log "PASS  time sync is running"
 
-curl -fsS --max-time 10 "http://127.0.0.1:${PANEL_PORT}/healthz" >/dev/null \
-  || die "panel did not answer on the installed system"
-log "PASS  panel serves from the installed disk"
-
 deadline=$(( SECONDS + TIMEOUT ))
-until curl -fsS --max-time 5 "http://127.0.0.1:${PANEL_PORT}/api/state" | grep -q '"phase":"ready"'; do
+until curl -fsS --max-time 5 "http://127.0.0.1:${PROXY_PORT}/api/state" | grep -q '"phase":"ready"'; do
   (( SECONDS < deadline )) || die "stack did not reach phase=ready on the installed system"
   sleep 5
 done
 log "PASS  stack is ready on the installed disk"
 
-curl -fsS --max-time 5 "http://127.0.0.1:${PANEL_PORT}/api/state" | grep -q '"persistent":true' \
+curl -fsS --max-time 5 "http://127.0.0.1:${PROXY_PORT}/api/state" | grep -q '"persistent":true' \
   || die "panel did not detect the data partition"
 log "PASS  panel reads the data partition"
 
@@ -266,7 +262,7 @@ log "PASS  container logs are rotated"
 guest "$FINAL_PASSWORD" "sudo ip addr add 100.64.0.1/32 dev tailscale0" \
   || die "could not assign a test address to tailscale0"
 deadline=$(( SECONDS + 30 ))
-until curl -fsS --max-time 5 "http://127.0.0.1:${PANEL_PORT}/api/state" | grep -q '"tailscale_ip":"100.64.0.1"'; do
+until curl -fsS --max-time 5 "http://127.0.0.1:${PROXY_PORT}/api/state" | grep -q '"tailscale_ip":"100.64.0.1"'; do
   (( SECONDS < deadline )) || die "panel did not report the tailscale0 address"
   sleep 3
 done
@@ -295,5 +291,27 @@ until guest "$FINAL_PASSWORD" 'docker exec smolofis-gitea-runner test -s /data/.
   sleep 5
 done
 log "PASS  Gitea runner registered itself"
+
+deadline=$(( SECONDS + 300 ))
+until guest "$FINAL_PASSWORD" "sudo nft list table inet smolofis" >/dev/null 2>&1; do
+  (( SECONDS < deadline )) || die "lockdown did not complete"
+  sleep 5
+done
+if curl -fsS --max-time 5 "http://127.0.0.1:${PANEL_PORT}/healthz" >/dev/null 2>&1; then
+  die "port 8090 is still reachable from the LAN"
+fi
+log "PASS  port 8090 is closed to the LAN"
+
+guest "$FINAL_PASSWORD" "sudo sh -c '. /etc/smolofis/admin.env; curl -fsS -u \"\$SMOLOFIS_ADMIN_USER:\$GITEA_ADMIN_PASSWORD\" http://127.0.0.1:3000/api/v1/user'" \
+  | grep -q '"is_admin":true' || die "Gitea admin login failed"
+log "PASS  Gitea admin account works"
+
+[[ "$(guest "$FINAL_PASSWORD" "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/register")" != "200" ]] \
+  || die "Coolify registration is still open"
+log "PASS  Coolify registration is closed"
+
+guest "$FINAL_PASSWORD" "sudo smolofis-admin show" | grep -q '^Coolify' || die "smolofis-admin show failed"
+guest "$FINAL_PASSWORD" "id smolofis-panel" | grep -qv docker || die "panel user is still in the docker group"
+log "PASS  panel has no Docker access"
 
 log "install test PASSED (${FIRMWARE})"

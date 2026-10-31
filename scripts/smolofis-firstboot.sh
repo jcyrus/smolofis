@@ -96,7 +96,7 @@ networks:
 services:
   traefik:
     container_name: coolify-proxy
-    image: traefik:v3.7
+    image: traefik:v3.7.16
     restart: unless-stopped
     extra_hosts:
       - host.docker.internal:host-gateway

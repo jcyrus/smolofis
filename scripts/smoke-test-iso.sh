@@ -232,7 +232,8 @@ if [[ ${TEST_STACK} -eq 1 ]]; then
   last_report=0
   while (( SECONDS < stack_deadline )); do
     kill -0 "$QEMU_PID" 2>/dev/null || die "QEMU exited unexpectedly while waiting for compose stack"
-    current_state="$(curl -fsS --max-time 3 "${BASE}/api/state" 2>/dev/null || true)"
+    # Through Traefik: provisioning closes port 8090 once the stack is up.
+    current_state="$(curl -fsS --max-time 3 "http://127.0.0.1:${PROXY_PORT}/api/state" 2>/dev/null || true)"
     current_phase="$(jq -er '.phase' <<<"$current_state" 2>/dev/null || true)"
     if [[ "$current_phase" == "ready" ]]; then
       break

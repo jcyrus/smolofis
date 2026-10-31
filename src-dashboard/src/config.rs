@@ -26,6 +26,9 @@ pub struct Config {
     pub data_path: Option<PathBuf>,
     /// Uptime after which a stack that never came up counts as degraded.
     pub boot_timeout: Duration,
+    /// systemd unit to check for the engine. Takes priority over `docker_socket`,
+    /// which is for development: access to it is root-equivalent.
+    pub docker_unit: Option<String>,
     /// Docker engine control socket, pinged to verify the engine is up.
     pub docker_socket: PathBuf,
     /// Interval between health/metric refresh cycles.
@@ -49,6 +52,9 @@ impl Config {
                 .filter(|v| !v.trim().is_empty())
                 .map(PathBuf::from),
             boot_timeout: Duration::from_secs(env_parsed("SMOLOFIS_BOOT_TIMEOUT_SECS", 900u64)),
+            docker_unit: std::env::var("SMOLOFIS_DOCKER_UNIT")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
             docker_socket: PathBuf::from(env_or("SMOLOFIS_DOCKER_SOCKET", "/var/run/docker.sock")),
             poll_interval: Duration::from_secs(env_parsed("SMOLOFIS_POLL_INTERVAL_SECS", 3u64)),
             gitea_public_port: env_parsed("SMOLOFIS_GITEA_PUBLIC_PORT", 3000u16),

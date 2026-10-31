@@ -27,7 +27,7 @@ services:
       GITEA__server__DOMAIN: smolofis.local
       GITEA__server__ROOT_URL: http://smolofis.local:3000/
       GITEA__server__SSH_PORT: "2222"
-      GITEA__service__DISABLE_REGISTRATION: "false"
+      GITEA__service__DISABLE_REGISTRATION: "true"
       GITEA__actions__ENABLED: "true"
       # Skip the install wizard: the runner cannot register until Gitea is set up.
       GITEA__security__INSTALL_LOCK: "true"
@@ -120,7 +120,7 @@ services:
       start_period: 60s
 
   coolify-db:
-    image: postgres:15-alpine
+    image: postgres:15.19-alpine
     container_name: smolofis-coolify-db
     restart: unless-stopped
     env_file:
@@ -138,7 +138,7 @@ services:
       retries: 10
 
   coolify-redis:
-    image: redis:7-alpine
+    image: redis:7.4.12-alpine
     container_name: smolofis-coolify-redis
     restart: unless-stopped
     command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]

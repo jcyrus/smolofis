@@ -113,7 +113,7 @@ jobs:
 
       - name: Build ISO
         run: |
-          chmod +x artifacts/smolofis-panel scripts/build-image.sh scripts/smolofis-firstboot.sh scripts/smolofis-install.sh scripts/smolofis-tailscale.sh scripts/smolofis-identity.sh
+          chmod +x artifacts/smolofis-panel scripts/build-image.sh scripts/smolofis-firstboot.sh scripts/smolofis-install.sh scripts/smolofis-tailscale.sh scripts/smolofis-identity.sh scripts/smolofis-admin.sh
           sudo --preserve-env=SMOLOFIS_VERSION scripts/build-image.sh \
             --binary artifacts/smolofis-panel \
             --version "${{ steps.version.outputs.version }}" \

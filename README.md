@@ -39,9 +39,10 @@ SmolOfis boots headless but provides full local console and SSH access:
 - **Default User:** `smolofis`
 - **Default Password:** `smolofis` (expired: you must choose a new one at first login, and it persists on an installed disk)
 - **Privileges:** Passwordless `sudo` rights
+- **Gitea & Coolify Logins:** Generated per device and claimed before the LAN can reach them. Read them with `sudo smolofis-admin show`. Open registration is off on both.
 - **SSH Port:** `22` (`ssh smolofis@smolofis.local`)
 - **Port & Ingress Allocation:**
-  - Control Panel: `http://smolofis.local` (Traefik on port `80`), or directly on port `8090` while the stack starts.
+  - Control Panel: `http://smolofis.local` (Traefik on port `80`). Port `8090` serves it directly on the USB image and while the stack starts, then closes to the LAN.
   - App Ingress: Traefik, managed by Coolify, owns ports `80` and `443`. An app needs a domain that resolves to the appliance, such as a real DNS name or `<app>.<ip>.sslip.io`. mDNS cannot resolve subdomains like `app.smolofis.local`.
   - Unclaimed hostnames and direct IP access land on the panel.
   - Gitea Web & API: `http://smolofis.local:3000`
