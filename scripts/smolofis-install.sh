@@ -179,7 +179,7 @@ udevadm settle || sleep 2
 # Filesystem Formatting
 # ---------------------------------------------------------------------------
 log "formatting EFI System Partition (${PART_EFI})..."
-mkfs.vfat -F 32 -n "SMOLOFIS_EFI" "${PART_EFI}" >/dev/null
+mkfs.vfat -F 32 -n "SMOLOFISEFI" "${PART_EFI}" >/dev/null
 
 log "formatting System Partition (${PART_SYS})..."
 mkfs.ext4 -F -q -L "SMOLOFIS_SYS" "${PART_SYS}"
