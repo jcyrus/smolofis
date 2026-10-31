@@ -12,18 +12,21 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore: ["**.md", "docs/**", "LICENSE"]
   # Build + smoke-test the ISO on PRs too; the release job stays gated to
   # main/tags (see its `if:`), so pull requests validate without publishing.
   pull_request:
     branches: [main]
+    paths-ignore: ["**.md", "docs/**", "LICENSE"]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: build-iso-${{ github.ref }}
-  cancel-in-progress: true
+  # A run on main may be publishing, so it always finishes.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-panel:
@@ -31,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install musl toolchain
         run: |
@@ -39,12 +42,14 @@ jobs:
           sudo apt-get install -y --no-install-recommends musl-tools
 
       - name: Install Rust (stable + musl target)
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
+          components: clippy, rustfmt
           targets: x86_64-unknown-linux-musl
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-dashboard
 
@@ -52,7 +57,16 @@ jobs:
         working-directory: src-dashboard
         run: |
           cargo fmt --check
-          cargo clippy --target x86_64-unknown-linux-musl -- -D warnings
+          cargo clippy --locked --all-targets --target x86_64-unknown-linux-musl -- -D warnings
+
+      - name: Check shell scripts
+        run: shellcheck -S warning scripts/*.sh
+
+      - name: Check dependency advisories
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+        with:
+          manifest-path: src-dashboard/Cargo.toml
+          command: check advisories
 
       # Run the suite on the host (gnu) target: the tests bind real TCP/unix
       # sockets and must actually execute, which the native target does without
@@ -63,7 +77,7 @@ jobs:
 
       - name: Build release binary
         working-directory: src-dashboard
-        run: cargo build --release --target x86_64-unknown-linux-musl
+        run: cargo build --locked --release --target x86_64-unknown-linux-musl
 
       - name: Sanity-check binary is static
         run: |
@@ -71,7 +85,7 @@ jobs:
           file src-dashboard/target/x86_64-unknown-linux-musl/release/smolofis-panel | grep -q 'static'
 
       - name: Upload panel binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: smolofis-panel
           path: src-dashboard/target/x86_64-unknown-linux-musl/release/smolofis-panel
@@ -86,10 +100,10 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Download panel binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: smolofis-panel
           path: artifacts
@@ -118,15 +132,28 @@ jobs:
             --binary artifacts/smolofis-panel \
             --version "${{ steps.version.outputs.version }}" \
             --precache-images \
+            --keep-work \
             --output "dist/smolofis-${{ steps.version.outputs.version }}-amd64.iso"
 
+      - name: Install Syft
+        id: syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
+
+      - name: Generate SBOM
+        run: |
+          sudo "${{ steps.syft.outputs.cmd }}" scan dir:work/rootfs \
+            --output "spdx-json=dist/smolofis-${{ steps.version.outputs.version }}-amd64.spdx.json"
+          sudo chmod a+r dist/*.spdx.json
+          sudo rm -rf work
+
       - name: Upload ISO artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: smolofis-iso-${{ steps.version.outputs.version }}
           path: |
             dist/*.iso
             dist/*.sha256
+            dist/*.spdx.json
           if-no-files-found: error
           retention-days: 14
 
@@ -136,10 +163,10 @@ jobs:
     needs: build-iso
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Download ISO artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: smolofis-iso-${{ needs.build-iso.outputs.version }}
           # upload-artifact strips the common dist/ prefix, so the artifact
@@ -165,7 +192,7 @@ jobs:
 
       - name: Upload guest serial log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: smoke-test-serial-${{ needs.build-iso.outputs.version }}
           path: smoke-serial.log
@@ -182,10 +209,10 @@ jobs:
         firmware: [uefi, bios]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Download ISO artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: smolofis-iso-${{ needs.build-iso.outputs.version }}
           path: dist
@@ -227,17 +254,26 @@ jobs:
     # Only publish images that booted, served the panel, and installed in CI.
     needs: [build-iso, smoke-test, install-test]
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     env:
       VERSION: ${{ needs.build-iso.outputs.version }}
     steps:
       - name: Download ISO artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: smolofis-iso-${{ needs.build-iso.outputs.version }}
           # upload-artifact strips the common dist/ prefix, so the artifact
           # holds bare-named files; restore them under dist/ where the smoke
           # script and the publish steps expect them.
           path: dist
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: dist/*.iso
 
       - name: Sign the release manifest
         env:
@@ -256,18 +292,18 @@ jobs:
 
       - name: Publish tagged release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: |
             dist/*.iso
             dist/*.sha256
+            dist/*.spdx.json
             dist/smolofis-manifest.txt
             dist/smolofis-manifest.txt.sig
           generate_release_notes: true
 
-      # Recreated from scratch each run via gh: updating an existing release
-      # from a branch ref trips auth bugs in release actions, and a fresh
-      # release also drops the previous run's version-numbered assets.
+      # Updated in place so the nightly never disappears. The manifest goes up
+      # after the ISO it names, and old versions are removed last.
       - name: Publish rolling nightly release
         if: github.ref == 'refs/heads/main'
         env:
@@ -275,14 +311,17 @@ jobs:
           # This job has no checkout, so gh cannot infer the repository.
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release delete nightly --yes --cleanup-tag || true
-          gh release create nightly dist/*.iso dist/*.sha256 dist/smolofis-manifest.txt dist/smolofis-manifest.txt.sig \
-            --prerelease \
-            --target "${GITHUB_SHA}" \
-            --title "SmolOfis nightly (main)" \
-            --notes "$(cat <<'EOF'
+          gh release upload nightly dist/*.iso dist/*.sha256 dist/*.spdx.json --clobber
+          gh release upload nightly dist/smolofis-manifest.txt dist/smolofis-manifest.txt.sig --clobber
+          ls dist > current-assets.txt
+          gh release view nightly --json assets --jq '.assets[].name' \
+            | { grep -vFxf current-assets.txt || true; } \
+            | xargs -r -n 1 gh release delete-asset nightly --yes
+          gh api --method PATCH "repos/${GH_REPO}/git/refs/tags/nightly" -f "sha=${GITHUB_SHA}" -F force=true
+          gh release edit nightly --notes "$(cat <<'EOF'
           Rolling build of the `main` branch.
           Flash with: `dd if=smolofis-*.iso of=/dev/sdX bs=4M status=progress conv=fsync`
           Then browse to **http://smolofis.local:8090** and run `sudo smolofis-install`.
+          Verify a download with `gh attestation verify smolofis-*.iso --repo jcyrus/smolofis`.
           EOF
           )"

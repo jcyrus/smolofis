@@ -33,6 +33,10 @@ pub struct Config {
     pub docker_socket: PathBuf,
     /// Interval between health/metric refresh cycles.
     pub poll_interval: Duration,
+    /// Installed image version, or the panel's own outside an image.
+    pub image_version: String,
+    /// System slot this boot came from; `None` on the USB image or in development.
+    pub boot_slot: Option<String>,
     /// Port the browser should use to reach Gitea (host-mapped).
     pub gitea_public_port: u16,
     /// Port the browser should use to reach Coolify (host-mapped).
@@ -57,10 +61,27 @@ impl Config {
                 .filter(|v| !v.trim().is_empty()),
             docker_socket: PathBuf::from(env_or("SMOLOFIS_DOCKER_SOCKET", "/var/run/docker.sock")),
             poll_interval: Duration::from_secs(env_parsed("SMOLOFIS_POLL_INTERVAL_SECS", 3u64)),
+            image_version: std::fs::read_to_string(env_or(
+                "SMOLOFIS_RELEASE_FILE",
+                "/etc/smolofis-release",
+            ))
+            .map(|v| v.trim().to_string())
+            .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string()),
+            boot_slot: std::fs::read_to_string("/proc/cmdline")
+                .ok()
+                .and_then(|cmdline| boot_slot(&cmdline)),
             gitea_public_port: env_parsed("SMOLOFIS_GITEA_PUBLIC_PORT", 3000u16),
             coolify_public_port: env_parsed("SMOLOFIS_COOLIFY_PUBLIC_PORT", 8000u16),
         }
     }
+}
+
+/// The slot named by `live-media-path=` on the kernel command line.
+fn boot_slot(cmdline: &str) -> Option<String> {
+    cmdline
+        .split_whitespace()
+        .find_map(|arg| arg.strip_prefix("live-media-path="))
+        .map(str::to_string)
 }
 
 fn env_or(key: &str, default: &str) -> String {
@@ -166,6 +187,15 @@ mod tests {
         let _env = EnvSnapshot::capture(&["SMOLOFIS_TEST_PARSE_UNSET"]);
         std::env::remove_var("SMOLOFIS_TEST_PARSE_UNSET");
         assert_eq!(env_parsed::<u64>("SMOLOFIS_TEST_PARSE_UNSET", 3), 3);
+    }
+
+    #[test]
+    fn boot_slot_reads_the_kernel_command_line() {
+        assert_eq!(
+            boot_slot("boot=live live-media-path=system-b panic=10\n").as_deref(),
+            Some("system-b")
+        );
+        assert_eq!(boot_slot("boot=live components"), None);
     }
 
     #[test]

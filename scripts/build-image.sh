@@ -30,6 +30,7 @@
 #   --work DIR       scratch directory         (default: ./work)
 #   --version VER    image version label       (default: 0.1.0 or $SMOLOFIS_VERSION)
 #   --keep-work      do not delete the scratch directory on success
+#   --precache-images  bundle the stack's images (requires docker on the host)
 
 set -euo pipefail
 
@@ -66,7 +67,7 @@ OUTPUT=""
 KEEP_WORK=0
 PRECACHE_IMAGES="${SMOLOFIS_PRECACHE_IMAGES:-0}"
 
-usage() { sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,33p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -296,6 +297,7 @@ install -o root -g root -m 0755 "${PANEL_BINARY}" "${ROOTFS}/usr/local/bin/smolo
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-firstboot.sh" "${ROOTFS}/usr/local/bin/smolofis-firstboot"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-install.sh" "${ROOTFS}/usr/local/bin/smolofis-install"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-tailscale.sh" "${ROOTFS}/usr/local/bin/smolofis-tailscale"
+install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-support.sh" "${ROOTFS}/usr/local/bin/smolofis-support"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-update.sh" "${ROOTFS}/usr/local/bin/smolofis-update"
 install -o root -g root -m 0644 "${REPO_ROOT}/config/release/allowed_signers" "${ROOTFS}/etc/smolofis-release-signers"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-backup.sh" "${ROOTFS}/usr/local/bin/smolofis-backup"
@@ -330,6 +332,8 @@ install -o root -g root -m 0644 \
     "${REPO_ROOT}/config/docker/docker-compose.yml" "${ROOTFS}/etc/smolofis/docker-compose.yml"
 install -o root -g root -m 0644 \
     "${REPO_ROOT}/config/docker/docker-compose.yml" "${ROOTFS}/usr/share/smolofis/docker-compose.yml"
+install -o root -g root -m 0644 \
+    "${REPO_ROOT}/config/system/persistence.conf" "${ROOTFS}/usr/share/smolofis/persistence.conf"
 
 # mDNS / network discovery.
 install -o root -g root -m 0644 \
@@ -357,7 +361,7 @@ install -d -m 0700 "${ROOTFS}/var/lib/tailscale"
 # Pre-cache core Docker stack images (enabled via --precache-images).
 if [[ ${PRECACHE_IMAGES} -eq 1 ]]; then
     if ! command -v docker >/dev/null 2>&1; then
-        warn "docker not found on host; skipping container image pre-caching"
+        die "--precache-images needs docker on the build host"
     else
         log "pre-caching core Docker container images into rootfs..."
         readonly DOCKER_STACK_IMAGES=(

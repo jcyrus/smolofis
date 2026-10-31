@@ -8,7 +8,6 @@
 set -euo pipefail
 
 readonly C_INFO=$'\033[1;32m'
-readonly C_WARN=$'\033[1;33m'
 readonly C_OFF=$'\033[0m'
 
 log() { printf '%s[smolofis-tailscale]%s %s\n' "${C_INFO}" "${C_OFF}" "$*"; }

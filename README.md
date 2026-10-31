@@ -51,6 +51,16 @@ SmolOfis boots headless but provides full local console and SSH access:
 
 ---
 
+## 🖥️ Hardware Requirements
+
+- **CPU:** x86-64. A recent mini-PC such as an Intel N100 is the target.
+- **Memory:** 4 GiB minimum, 8 GiB recommended. The full stack is tested with 6 GiB.
+- **Storage:** 32 GiB minimum on an internal SSD. The system partition takes about 8.5 GiB, and the rest holds your data. 128 GiB or more is sensible for real use.
+- **Network:** wired Ethernet with DHCP. Wi-Fi is not configured.
+- **Firmware:** UEFI or legacy BIOS. **Turn Secure Boot off**, because the bootloader is not signed for it.
+
+---
+
 ## 💾 Installing SmolOfis to Internal Disk
 
 SmolOfis boots as a live image from USB for trying the panel and running the installer. The Gitea and Coolify stack needs a data partition, so it only starts after installing; on the USB image the panel is at `http://smolofis.local:8090` and shows `LIVE MODE`. To permanently install the appliance onto your hardware's internal NVMe or SATA SSD:
@@ -94,6 +104,12 @@ sudo smolofis-install --upgrade --disk /dev/nvme0n1
 This replaces the active system and leaves your repositories, deployments, password and SSH keys alone. Remove the USB drive and reboot. A USB upgrade has no automatic rollback, so take a backup first.
 
 Stack changes ship with the image, so `/etc/smolofis/docker-compose.yml` is replaced on every boot. Put local changes in `/etc/smolofis/docker-compose.override.yml`.
+
+---
+
+## 🩺 Troubleshooting
+
+`sudo smolofis-support` writes a bundle of logs and system state to `/var/lib/smolofis`. It leaves out the files that hold secrets, but read it before sharing, because logs can name hosts and users.
 
 ---
 
@@ -141,8 +157,8 @@ SmolOfis comes with Tailscale pre-installed. You can connect your appliance to y
 
 SmolOfis is a highly transparent, **ongoing personal portfolio project** aimed at exploring platform engineering, system initialization, and infrastructure automation. 
 
-- **What works right now:** The complete Rust control plane (live host telemetry, an `Initializing → Ready → Degraded` boot-phase state machine, health probes for Docker/Gitea/Coolify over HTTP and the engine's unix socket) backed by a `cargo test` unit suite, the hardened `systemd` boot orchestration, the Debian 13 ISO build pipeline (`scripts/build-image.sh`), a local mock harness (`scripts/dev-mock.sh`), and the GitHub Actions workflow that compiles and publishes flashable images.
-- **What has not been proven yet:** The generated ISO boots headless in QEMU under CI, but has not yet been booted on physical hardware — that is the current focus.
+- **What works right now:** On UEFI and BIOS virtual machines, CI proves the full lifecycle on every change: USB install, boot from disk, Traefik routing, Coolify's SSH access, Gitea runner registration, backup and restore, USB upgrades, signed A/B updates, and automatic rollback.
+- **What has not been proven yet:** Physical hardware, a real Coolify deployment, and a real Gitea Actions job. Treat nightly builds as test builds for a trusted network.
 
 Because this project is actively evolving, breaking changes to the configuration structure are to be expected. Feature requests, architectural feedback, and code contributions are highly encouraged!
 
@@ -164,14 +180,16 @@ Because this project is actively evolving, breaking changes to the configuration
 - [x] Create a GitHub Actions workflow to compile the full OS image on every main-branch push.
 - [x] Pre-cache core Docker stack images in SquashFS for 100% offline cold boots.
 - [x] Bare-metal interactive installer (`smolofis-install`) for NVMe/SATA internal SSDs.
-- [x] Smoke-test the ISO in QEMU as part of CI (`scripts/smoke-test-iso.sh`) — boots the image headless and asserts the panel serves before any release is published.
+- [x] Smoke-test the ISO in QEMU as part of CI (`scripts/smoke-test-iso.sh`), and test the full install and upgrade lifecycle (`scripts/install-test-iso.sh`), before any release is published.
 - [ ] Verify the first flashable `.iso` release boots end-to-end on physical hardware.
 
 ### Phase 4: Hardening & Reach (Planned)
 - [x] Unit tests for the panel's state machine, health probes, and config parsing.
 - [x] Vendor dashboard assets — compiled Tailwind + woff2 fonts embedded in the panel binary; fully offline LANs get the styled UI.
 - [x] Zero-config remote access integrations (Tailscale client, daemon enablement, Tailscale SSH, and live dashboard badge).
-- [ ] Atomic A/B image updates with rollback (immutable-OS style).
+- [x] Signed A/B image updates with automatic rollback.
+- [x] Per-device admin accounts, scheduled backups, and USB upgrades.
+- [ ] Verify on physical hardware, with a real Coolify deployment and Gitea Actions job.
 
 ---
 

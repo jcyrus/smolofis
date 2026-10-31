@@ -484,6 +484,8 @@ mod tests {
             docker_unit: None,
             docker_socket: PathBuf::from("/nonexistent/smolofis-docker.sock"),
             poll_interval: Duration::from_secs(3),
+            image_version: "test".to_string(),
+            boot_slot: None,
             gitea_public_port: 3000,
             coolify_public_port: 8000,
         }

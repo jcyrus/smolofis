@@ -69,7 +69,8 @@ struct DashboardTemplate {
     phase: &'static str,
     phase_label: &'static str,
     hostname: String,
-    version: &'static str,
+    image_version: String,
+    boot_slot: String,
     cpu: String,
     mem_used: String,
     mem_total: String,
@@ -92,7 +93,8 @@ pub async fn dashboard(State(state): State<Arc<AppState>>) -> Response {
         phase: snap.phase.as_str(),
         phase_label: snap.phase.label(),
         hostname: m.hostname.clone(),
-        version: VERSION,
+        image_version: state.config.image_version.clone(),
+        boot_slot: slot_label(&state),
         cpu: format!("{:.1}", m.cpu_percent),
         mem_used: fmt_gib(m.mem_used),
         mem_total: fmt_gib(m.mem_total),
@@ -123,7 +125,11 @@ pub async fn api_state(State(state): State<Arc<AppState>>) -> Json<serde_json::V
         "services": snap.services,
         "metrics": api_metrics(&snap.metrics),
         "updated_at": snap.updated_at,
-        "panel": { "version": VERSION },
+        "panel": {
+            "version": VERSION,
+            "image_version": state.config.image_version,
+            "boot_slot": state.config.boot_slot,
+        },
         "links": {
             "gitea_port": state.config.gitea_public_port,
             "coolify_port": state.config.coolify_public_port,
@@ -131,7 +137,7 @@ pub async fn api_state(State(state): State<Arc<AppState>>) -> Json<serde_json::V
     }))
 }
 
-/// GET /healthz — liveness for systemd watchdogs and external monitors.
+/// GET /healthz — liveness for external monitors.
 pub async fn healthz() -> &'static str {
     "ok"
 }
@@ -160,6 +166,14 @@ pub async fn asset_font(Path(file): Path<String>) -> Response {
             .into_response(),
         None => (StatusCode::NOT_FOUND, "unknown font asset").into_response(),
     }
+}
+
+fn slot_label(state: &AppState) -> String {
+    state
+        .config
+        .boot_slot
+        .clone()
+        .unwrap_or_else(|| "live".to_string())
 }
 
 fn api_metrics(m: &Metrics) -> serde_json::Value {
