@@ -113,7 +113,7 @@ jobs:
 
       - name: Build ISO
         run: |
-          chmod +x artifacts/smolofis-panel scripts/build-image.sh scripts/smolofis-firstboot.sh scripts/smolofis-install.sh scripts/smolofis-tailscale.sh scripts/smolofis-identity.sh scripts/smolofis-admin.sh scripts/smolofis-backup.sh
+          chmod +x artifacts/smolofis-panel scripts/build-image.sh scripts/smolofis-firstboot.sh scripts/smolofis-install.sh scripts/smolofis-tailscale.sh scripts/smolofis-identity.sh scripts/smolofis-admin.sh scripts/smolofis-backup.sh scripts/smolofis-update.sh
           sudo --preserve-env=SMOLOFIS_VERSION scripts/build-image.sh \
             --binary artifacts/smolofis-panel \
             --version "${{ steps.version.outputs.version }}" \
@@ -194,17 +194,32 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            qemu-system-x86 qemu-utils ovmf expect sshpass curl
+            qemu-system-x86 qemu-utils ovmf expect sshpass curl openssh-client
           if [[ -e /dev/kvm ]]; then
             sudo chmod 666 /dev/kvm || true
           fi
 
+      # UEFI upgrades from the last published nightly, the path a user would
+      # take. BIOS covers a clean install of this build.
+      - name: Download the previous nightly
+        if: matrix.firmware == 'uefi'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p base
+          gh release download nightly --pattern '*.iso' --output base/base.iso
+
       - name: Install the ISO, reboot, and assert persistence
         run: |
           chmod +x scripts/install-test-iso.sh
+          base_args=()
+          if [[ -f base/base.iso ]]; then
+            base_args=(--base-iso base/base.iso)
+          fi
           scripts/install-test-iso.sh \
             --iso "dist/smolofis-${{ needs.build-iso.outputs.version }}-amd64.iso" \
-            --firmware "${{ matrix.firmware }}"
+            --firmware "${{ matrix.firmware }}" \
+            "${base_args[@]}"
 
   release:
     name: Publish ISO release
@@ -212,6 +227,8 @@ jobs:
     # Only publish images that booted, served the panel, and installed in CI.
     needs: [build-iso, smoke-test, install-test]
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    env:
+      VERSION: ${{ needs.build-iso.outputs.version }}
     steps:
       - name: Download ISO artifact
         uses: actions/download-artifact@v4
@@ -222,6 +239,21 @@ jobs:
           # script and the publish steps expect them.
           path: dist
 
+      - name: Sign the release manifest
+        env:
+          RELEASE_KEY: ${{ secrets.SMOLOFIS_RELEASE_KEY }}
+        run: |
+          iso="smolofis-${VERSION}-amd64.iso"
+          {
+            echo "VERSION=${VERSION}"
+            echo "ISO=${iso}"
+            echo "SHA256=$(cut -d' ' -f1 "dist/${iso}.sha256")"
+          } > dist/smolofis-manifest.txt
+          key="$(mktemp)"
+          trap 'rm -f "${key}"' EXIT
+          printf '%s\n' "${RELEASE_KEY}" > "${key}"
+          ssh-keygen -Y sign -f "${key}" -n smolofis-release dist/smolofis-manifest.txt
+
       - name: Publish tagged release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
@@ -229,6 +261,8 @@ jobs:
           files: |
             dist/*.iso
             dist/*.sha256
+            dist/smolofis-manifest.txt
+            dist/smolofis-manifest.txt.sig
           generate_release_notes: true
 
       # Recreated from scratch each run via gh: updating an existing release
@@ -242,7 +276,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release delete nightly --yes --cleanup-tag || true
-          gh release create nightly dist/*.iso dist/*.sha256 \
+          gh release create nightly dist/*.iso dist/*.sha256 dist/smolofis-manifest.txt dist/smolofis-manifest.txt.sig \
             --prerelease \
             --target "${GITHUB_SHA}" \
             --title "SmolOfis nightly (main)" \

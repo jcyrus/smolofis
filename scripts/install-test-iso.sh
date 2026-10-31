@@ -11,12 +11,14 @@
 #      that Coolify, the Gitea runner, Traefik routing and backups all work
 #   4. boot the ISO again and run smolofis-install --upgrade
 #   5. boot the disk and assert that the upgrade kept the data
+#   6. apply a signed A/B update, then prove rollback from a corrupted slot
 #
 # Usage:
 #   scripts/install-test-iso.sh --iso dist/smolofis-<ver>-amd64.iso [options]
 #
 # Options:
-#   --iso PATH        ISO image to install           (required)
+#   --iso PATH        ISO image to test              (required)
+#   --base-iso PATH   install this first, then upgrade to --iso
 #   --firmware NAME   uefi or bios                   (default: uefi)
 #   --timeout N       seconds to wait for each boot  (default: 600)
 #   --mem N           guest RAM in MiB               (default: 6144)
@@ -28,6 +30,7 @@
 set -euo pipefail
 
 ISO=""
+BASE_ISO=""
 FIRMWARE="uefi"
 TIMEOUT=600
 MEM=6144
@@ -50,6 +53,7 @@ die() { printf '\033[1;31m[install-test] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --iso)        ISO="$2"; shift 2 ;;
+    --base-iso)   BASE_ISO="$2"; shift 2 ;;
     --firmware)   FIRMWARE="$2"; shift 2 ;;
     --timeout)    TIMEOUT="$2"; shift 2 ;;
     --mem)        MEM="$2"; shift 2 ;;
@@ -57,7 +61,7 @@ while [[ $# -gt 0 ]]; do
     --ssh-port)   SSH_PORT="$2"; shift 2 ;;
     --panel-port) PANEL_PORT="$2"; shift 2 ;;
     --proxy-port) PROXY_PORT="$2"; shift 2 ;;
-    -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
 done
@@ -65,7 +69,7 @@ done
 [[ -n "$ISO" ]] || die "--iso is required"
 [[ -f "$ISO" ]] || die "ISO not found: $ISO"
 [[ "$FIRMWARE" == "uefi" || "$FIRMWARE" == "bios" ]] || die "--firmware must be uefi or bios"
-for tool in qemu-system-x86_64 qemu-img expect sshpass ssh ssh-keyscan ssh-keygen curl; do
+for tool in qemu-system-x86_64 qemu-img expect sshpass ssh scp ssh-keyscan ssh-keygen sha256sum curl; do
   command -v "$tool" >/dev/null 2>&1 || die "missing required tool: $tool"
 done
 
@@ -107,6 +111,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
+REBOOT_ARGS=(-no-reboot)
+
 # shellcheck disable=SC2054
 SSH_OPTS=(
   -p "$SSH_PORT"
@@ -138,7 +144,7 @@ boot_vm() {
     -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22,hostfwd=tcp:127.0.0.1:${PANEL_PORT}-:8090,hostfwd=tcp:127.0.0.1:${PROXY_PORT}-:80" \
     -device virtio-net-pci,netdev=net0 \
     -display none -serial "file:${SERIAL_LOG}" -monitor none \
-    -no-reboot &
+    "${REBOOT_ARGS[@]}" &
   QEMU_PID=$!
 
   local deadline=$(( SECONDS + TIMEOUT ))
@@ -196,12 +202,15 @@ shutdown_vm() {
 # shellcheck disable=SC2054
 ISO_ARGS=(-drive "file=${ISO},if=none,id=usb,media=cdrom,readonly=on" -device ide-cd,drive=usb,bootindex=0)
 
+# shellcheck disable=SC2054
+BASE_ISO_ARGS=(-drive "file=${BASE_ISO:-$ISO},if=none,id=usb,media=cdrom,readonly=on" -device ide-cd,drive=usb,bootindex=0)
+
 qemu-img create -f raw "$DISK" 24G >/dev/null
 
 # ---------------------------------------------------------------------------
 # Stage 1 — live boot and install
 # ---------------------------------------------------------------------------
-boot_vm "live ISO" "${ISO_ARGS[@]}"
+boot_vm "live ISO" "${BASE_ISO_ARGS[@]}"
 
 change_expired_password "$DEFAULT_PASSWORD" "$LIVE_PASSWORD"
 guest "$LIVE_PASSWORD" true || die "forced password change did not take effect on the live image"
@@ -395,5 +404,84 @@ wait_gitea
 gitea_api "http://127.0.0.1:3000/api/v1/repos/smolofis/keepme" >/dev/null \
   || die "the repository did not survive the upgrade"
 log "PASS  repository survived the upgrade"
+
+# ---------------------------------------------------------------------------
+# Stage 6 — signed A/B update and rollback
+# ---------------------------------------------------------------------------
+diagnose_guest() {
+  echo "----- guest diagnostics -----"
+  guest "$FINAL_PASSWORD" "ls -la /data /data/coolify/ /data/coolify/proxy /data/coolify/proxy/dynamic; \
+    sudo systemctl --no-pager status smolofis-infrastructure | tail -n 15; docker ps -a; \
+    docker inspect -f '{{json .Mounts}}' coolify-proxy; docker logs --tail 20 coolify-proxy; \
+    curl -sS --max-time 5 http://127.0.0.1:8090/api/state" 2>&1 || true
+  echo "-----------------------------"
+}
+
+wait_ready() {
+  local deadline=$(( SECONDS + TIMEOUT ))
+  until curl -fsS --max-time 5 "http://127.0.0.1:${PROXY_PORT}/api/state" | grep -q '"phase":"ready"'; do
+    if (( SECONDS >= deadline )); then
+      diagnose_guest
+      die "stack did not reach phase=ready: $1"
+    fi
+    sleep 5
+  done
+}
+
+slot_status() { guest "$FINAL_PASSWORD" "sudo smolofis-update status" | awk -v k="$1" '$1 == k { print $2 }'; }
+
+wait_ready "before the A/B update"
+
+BUNDLE="${WORK}/bundle"
+mkdir -p "$BUNDLE"
+ssh-keygen -q -t ed25519 -N '' -C test -f "${WORK}/test-key"
+printf 'smolofis-release %s\n' "$(cut -d' ' -f1,2 "${WORK}/test-key.pub")" > "${BUNDLE}/signers"
+cat > "${BUNDLE}/smolofis-manifest.txt" <<EOF
+VERSION=9999.0.0
+ISO=update.iso
+SHA256=$(sha256sum "$ISO" | cut -d' ' -f1)
+EOF
+ssh-keygen -q -Y sign -f "${WORK}/test-key" -n smolofis-release "${BUNDLE}/smolofis-manifest.txt"
+ln "$ISO" "${BUNDLE}/update.iso" 2>/dev/null || cp "$ISO" "${BUNDLE}/update.iso"
+
+guest "$FINAL_PASSWORD" "sudo install -d -o smolofis /var/lib/smolofis/update-test"
+SSHPASS="$FINAL_PASSWORD" sshpass -e scp -P "$SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  -o LogLevel=ERROR "${BUNDLE}"/* "smolofis@127.0.0.1:/var/lib/smolofis/update-test/"
+readonly APPLY="sudo smolofis-update apply --from /var/lib/smolofis/update-test --signers /var/lib/smolofis/update-test/signers --no-reboot"
+
+guest "$FINAL_PASSWORD" "cp /var/lib/smolofis/update-test/smolofis-manifest.txt /tmp/manifest && sed -i s/9999.0.0/9999.0.1/ /var/lib/smolofis/update-test/smolofis-manifest.txt"
+if guest "$FINAL_PASSWORD" "$APPLY" 2>/dev/null; then
+  die "a tampered manifest was accepted"
+fi
+guest "$FINAL_PASSWORD" "cp /tmp/manifest /var/lib/smolofis/update-test/smolofis-manifest.txt"
+log "PASS  tampered manifest rejected"
+
+if guest "$FINAL_PASSWORD" "sudo smolofis-update apply --from /var/lib/smolofis/update-test --no-reboot" 2>/dev/null; then
+  die "a manifest from an untrusted key was accepted"
+fi
+log "PASS  untrusted signing key rejected"
+
+guest "$FINAL_PASSWORD" "$APPLY" >/dev/null || die "smolofis-update apply failed"
+shutdown_vm "$FINAL_PASSWORD"
+
+boot_vm "updated slot"
+[[ "$(slot_status booted)" == "system-b" ]] || die "the update did not boot system-b"
+wait_ready "after the A/B update"
+deadline=$(( SECONDS + 120 ))
+until [[ "$(slot_status active)" == "system-b" ]]; do
+  (( SECONDS < deadline )) || die "system-b was not promoted"
+  sleep 5
+done
+log "PASS  update booted and was promoted to the active slot"
+
+guest "$FINAL_PASSWORD" "$APPLY" >/dev/null || die "second smolofis-update apply failed"
+guest "$FINAL_PASSWORD" "sudo mount -o remount,rw /run/live/medium && sudo truncate -s 4096 /run/live/medium/system-a/filesystem.squashfs && sync"
+shutdown_vm "$FINAL_PASSWORD"
+
+# The failed slot panics and reboots, so this boot must allow a reset.
+REBOOT_ARGS=()
+boot_vm "corrupted slot, expecting rollback"
+[[ "$(slot_status booted)" == "system-b" ]] || die "rollback did not return to system-b"
+log "PASS  a failed update rolled back to the previous slot"
 
 log "install test PASSED (${FIRMWARE})"

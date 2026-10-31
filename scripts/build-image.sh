@@ -296,6 +296,8 @@ install -o root -g root -m 0755 "${PANEL_BINARY}" "${ROOTFS}/usr/local/bin/smolo
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-firstboot.sh" "${ROOTFS}/usr/local/bin/smolofis-firstboot"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-install.sh" "${ROOTFS}/usr/local/bin/smolofis-install"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-tailscale.sh" "${ROOTFS}/usr/local/bin/smolofis-tailscale"
+install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-update.sh" "${ROOTFS}/usr/local/bin/smolofis-update"
+install -o root -g root -m 0644 "${REPO_ROOT}/config/release/allowed_signers" "${ROOTFS}/etc/smolofis-release-signers"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-backup.sh" "${ROOTFS}/usr/local/bin/smolofis-backup"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-admin.sh" "${ROOTFS}/usr/local/bin/smolofis-admin"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-identity.sh" "${ROOTFS}/usr/local/bin/smolofis-identity"
@@ -303,6 +305,7 @@ install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-identity.sh" "${ROOTFS}/
 # systemd orchestration units.
 install -o root -g root -m 0644 \
     "${REPO_ROOT}/config/systemd/smolofis-tailscale-connect.service" \
+    "${REPO_ROOT}/config/systemd/smolofis-update-verify.service" \
     "${REPO_ROOT}/config/systemd/smolofis-backup.service" \
     "${REPO_ROOT}/config/systemd/smolofis-backup.timer" \
     "${REPO_ROOT}/config/systemd/smolofis-panel.service" \
@@ -344,6 +347,11 @@ install -o root -g root -m 0600 \
 
 # Persistent storage root (populated by smolofis-firstboot at runtime).
 install -d -m 0755 "${ROOTFS}/var/lib/smolofis"
+# Coolify hardcodes /data/coolify. The link ships in the image because Docker
+# restarts containers before smolofis-firstboot runs, and a missing bind source
+# would be created as an empty directory.
+install -d -m 0755 "${ROOTFS}/data"
+ln -s /var/lib/smolofis/coolify "${ROOTFS}/data/coolify"
 install -d -m 0700 "${ROOTFS}/var/lib/tailscale"
 
 # Pre-cache core Docker stack images (enabled via --precache-images).
@@ -417,6 +425,7 @@ systemctl --root="${ROOTFS}" enable \
     smolofis-identity-save.path \
     smolofis-tailscale-connect.service \
     smolofis-backup.timer \
+    smolofis-update-verify.service \
     systemd-timesyncd.service \
     docker.service \
     NetworkManager.service \
