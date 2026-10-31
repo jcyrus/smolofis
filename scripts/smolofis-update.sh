@@ -59,6 +59,14 @@ cmd_status() {
     printf 'version %s\nbooted  %s\nactive  %s\n' "$(cat /etc/smolofis-release)" "$(booted_slot)" "$(active_slot)"
 }
 
+# Runs at exit, after cmd_apply's locals are gone.
+cleanup_apply() {
+    umount "${ISO_MNT}" 2>/dev/null || true
+    rmdir "${ISO_MNT}" 2>/dev/null || true
+    remount ro || true
+    rm -f "${WORK}"/*
+}
+
 cmd_apply() {
     local channel="stable" from="" signers="/etc/smolofis-release-signers" reboot=1
     while [[ $# -gt 0 ]]; do
@@ -75,7 +83,7 @@ cmd_apply() {
 
     install -d -m 0700 "${WORK}"
     rm -f "${WORK}"/*
-    local url version iso sum slot mnt
+    local url version iso sum slot
     if [[ -n "${from}" ]]; then
         cp "${from}/smolofis-manifest.txt" "${WORK}/manifest.txt"
         cp "${from}/smolofis-manifest.txt.sig" "${WORK}/manifest.txt.sig"
@@ -104,15 +112,15 @@ cmd_apply() {
 
     slot="system-a"
     [[ "$(active_slot)" != "system-a" ]] || slot="system-b"
-    mnt="$(mktemp -d)"
-    trap 'umount "${mnt}" 2>/dev/null || true; rmdir "${mnt}" 2>/dev/null || true; remount ro || true; rm -f "${WORK}"/*' EXIT
-    mount -o loop,ro "${WORK}/update.iso" "${mnt}"
+    ISO_MNT="$(mktemp -d)"
+    trap cleanup_apply EXIT
+    mount -o loop,ro "${WORK}/update.iso" "${ISO_MNT}"
     remount rw
 
     log "writing ${version} to ${slot}"
     rm -rf "${MEDIUM:?}/${slot}"
     mkdir -p "${MEDIUM}/${slot}"
-    cp "${mnt}/live/vmlinuz" "${mnt}/live/initrd.img" "${mnt}/live/filesystem.squashfs" "${MEDIUM}/${slot}/"
+    cp "${ISO_MNT}/live/vmlinuz" "${ISO_MNT}/live/initrd.img" "${ISO_MNT}/live/filesystem.squashfs" "${MEDIUM}/${slot}/"
     sync
     grub-editenv "${GRUBENV}" set "next_slot=${slot}"
     sync
