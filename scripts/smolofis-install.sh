@@ -67,7 +67,7 @@ done
 # ---------------------------------------------------------------------------
 # Preflight checks & tool validation
 # ---------------------------------------------------------------------------
-for tool in parted mkfs.vfat mkfs.ext4 grub-install lsblk findmnt blkid; do
+for tool in parted mkfs.vfat mkfs.ext4 grub-install grub-editenv lsblk findmnt blkid; do
     command -v "${tool}" >/dev/null 2>&1 || die "missing required utility: ${tool}"
 done
 
@@ -166,7 +166,7 @@ done
 # ---------------------------------------------------------------------------
 # Live USBs search disks for /live, so installed systems use another path. That
 # keeps a USB boot from picking up the internal disk instead of itself.
-readonly SLOT="system-a"
+SLOT="system-a"
 SYS_MNT="${MOUNT_DIR}/sys"
 DATA_MNT="${MOUNT_DIR}/data"
 mkdir -p "${SYS_MNT}" "${DATA_MNT}"
@@ -202,16 +202,34 @@ set color_highlight=black/light-green
 
 search --no-floppy --label --set=root SMOLOFIS_SYS
 
+# next_slot is tried once: it is cleared before booting, so a failed update
+# falls back to active_slot. smolofis-update-verify promotes a good one.
+set active_slot=${SLOT}
+if [ -s \$prefix/grubenv ]; then
+    load_env
+fi
+set boot_slot=\$active_slot
+if [ -n "\$next_slot" ]; then
+    set boot_slot=\$next_slot
+    set next_slot=
+    save_env next_slot
+fi
+export boot_slot
+
 menuentry "SmolOfis Appliance" {
-    linux  /${SLOT}/vmlinuz boot=live components persistence live-media=/dev/disk/by-label/SMOLOFIS_SYS live-media-path=${SLOT} quiet splash loglevel=3 vga=current hostname=smolofis
-    initrd /${SLOT}/initrd.img
+    linux  /\$boot_slot/vmlinuz boot=live components persistence live-media=/dev/disk/by-label/SMOLOFIS_SYS live-media-path=\$boot_slot panic=10 quiet splash loglevel=3 vga=current hostname=smolofis
+    initrd /\$boot_slot/initrd.img
 }
 
 menuentry "SmolOfis Appliance (debug console)" {
-    linux  /${SLOT}/vmlinuz boot=live components persistence live-media=/dev/disk/by-label/SMOLOFIS_SYS live-media-path=${SLOT} hostname=smolofis systemd.log_level=info
-    initrd /${SLOT}/initrd.img
+    linux  /\$boot_slot/vmlinuz boot=live components persistence live-media=/dev/disk/by-label/SMOLOFIS_SYS live-media-path=\$boot_slot panic=10 hostname=smolofis systemd.log_level=info
+    initrd /\$boot_slot/initrd.img
 }
 EOF
+if [[ ! -f "${SYS_MNT}/boot/grub/grubenv" ]]; then
+    grub-editenv "${SYS_MNT}/boot/grub/grubenv" create
+fi
+grub-editenv "${SYS_MNT}/boot/grub/grubenv" set "active_slot=${SLOT}"
 }
 
 # ---------------------------------------------------------------------------
@@ -222,6 +240,10 @@ if [[ ${UPGRADE} -eq 1 ]]; then
     [[ -n "${PART_SYS}" ]] || die "no SmolOfis system partition on ${TARGET_DISK}"
     log "upgrading ${TARGET_DISK} (${DISK_INFO})"
     mount "${PART_SYS}" "${SYS_MNT}"
+    if [[ -f "${SYS_MNT}/boot/grub/grubenv" ]]; then
+        CURRENT_SLOT="$(grub-editenv "${SYS_MNT}/boot/grub/grubenv" list | sed -n 's/^active_slot=//p')"
+        SLOT="${CURRENT_SLOT:-${SLOT}}"
+    fi
     copy_system
     rm -rf "${SYS_MNT}/live"
     write_grub_cfg

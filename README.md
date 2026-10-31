@@ -73,13 +73,25 @@ sudo smolofis-install --disk /dev/nvme0n1 --yes
 
 ## 🔄 Upgrading
 
-Flash the newer ISO to a USB stick, boot from it, and run:
+Over the network:
+
+```bash
+smolofis-update check                 # compare with the latest release
+sudo smolofis-update apply            # verify, back up, install, reboot
+smolofis-update status                # version, booted slot and active slot
+```
+
+Add `--channel nightly` to either command to follow `main`. Updates must be signed by the release key, and only newer versions are accepted. The new version goes into the unused system slot and boots once. It becomes active after the stack reports ready; otherwise the appliance returns to the previous slot.
+
+Rollback restores the system, not your data. If Gitea or Coolify migrated their databases before the failure, restore the backup that `apply` took: `sudo smolofis-backup restore <name> --yes`.
+
+Without network access, flash the newer ISO to a USB stick, boot from it, and run:
 
 ```bash
 sudo smolofis-install --upgrade --disk /dev/nvme0n1
 ```
 
-This replaces the system partition and leaves your repositories, deployments, password and SSH keys alone. Remove the USB drive and reboot. There is no automatic rollback yet, so take a backup first. Rolling back to an older version may not work once Gitea or Coolify have migrated their databases.
+This replaces the active system and leaves your repositories, deployments, password and SSH keys alone. Remove the USB drive and reboot. A USB upgrade has no automatic rollback, so take a backup first.
 
 Stack changes ship with the image, so `/etc/smolofis/docker-compose.yml` is replaced on every boot. Put local changes in `/etc/smolofis/docker-compose.override.yml`.
 

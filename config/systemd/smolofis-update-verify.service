@@ -1,0 +1,14 @@
+# Promotes a newly updated slot once the stack reports ready, or reboots back
+# to the previous slot. Does nothing on a normal boot.
+
+[Unit]
+Description=Verify a SmolOfis system update
+Documentation=https://github.com/jcyrus/smolofis
+After=smolofis-panel.service
+
+[Service]
+Type=exec
+ExecStart=/usr/local/bin/smolofis-update verify
+
+[Install]
+WantedBy=multi-user.target
