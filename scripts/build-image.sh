@@ -309,6 +309,7 @@ install -o root -g root -m 0644 \
     "${REPO_ROOT}/config/systemd/smolofis-tailscale-connect.service" \
     "${REPO_ROOT}/config/systemd/smolofis-update-verify.service" \
     "${REPO_ROOT}/config/systemd/smolofis-live-mdns.service" \
+    "${REPO_ROOT}/config/systemd/smolofis-lockdown.service" \
     "${REPO_ROOT}/config/systemd/smolofis-backup.service" \
     "${REPO_ROOT}/config/systemd/smolofis-backup.timer" \
     "${REPO_ROOT}/config/systemd/smolofis-panel.service" \
@@ -441,6 +442,7 @@ systemctl --root="${ROOTFS}" enable \
     smolofis-backup.timer \
     smolofis-update-verify.service \
     smolofis-live-mdns.service \
+    smolofis-lockdown.service \
     systemd-timesyncd.service \
     docker.service \
     NetworkManager.service \
