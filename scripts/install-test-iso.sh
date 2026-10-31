@@ -37,6 +37,7 @@ PANEL_PORT=8651
 PROXY_PORT=8653
 WORK="$(mktemp -d)"
 DISK="${WORK}/disk.raw"
+SERIAL_LOG="${WORK}/serial.log"
 QEMU_PID=""
 
 readonly DEFAULT_PASSWORD="smolofis"
@@ -116,6 +117,13 @@ SSH_OPTS=(
   -o PreferredAuthentications=password,keyboard-interactive
 )
 
+boot_failed() {
+  echo "----- last 40 lines of guest serial console -----"
+  tail -n 40 "$SERIAL_LOG" 2>/dev/null || true
+  echo "-------------------------------------------------"
+  die "$1"
+}
+
 # boot_vm <label> [extra qemu args...]
 boot_vm() {
   local label="$1"; shift
@@ -124,18 +132,19 @@ boot_vm() {
     "${ACCEL[@]}" \
     "${FIRMWARE_ARGS[@]}" \
     -m "$MEM" -smp "$SMP" \
-    -drive "file=${DISK},format=raw,if=virtio" \
+    -drive "file=${DISK},format=raw,if=none,id=disk0" \
+    -device virtio-blk-pci,drive=disk0,bootindex=1 \
     "$@" \
     -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22,hostfwd=tcp:127.0.0.1:${PANEL_PORT}-:8090,hostfwd=tcp:127.0.0.1:${PROXY_PORT}-:80" \
     -device virtio-net-pci,netdev=net0 \
-    -display none -serial null -monitor none \
+    -display none -serial "file:${SERIAL_LOG}" -monitor none \
     -no-reboot &
   QEMU_PID=$!
 
   local deadline=$(( SECONDS + TIMEOUT ))
   until ssh-keyscan -T 3 -p "$SSH_PORT" 127.0.0.1 2>/dev/null | grep -q .; do
-    kill -0 "$QEMU_PID" 2>/dev/null || die "QEMU exited during boot: ${label}"
-    (( SECONDS < deadline )) || die "timed out waiting for SSH: ${label}"
+    kill -0 "$QEMU_PID" 2>/dev/null || boot_failed "QEMU exited during boot: ${label}"
+    (( SECONDS < deadline )) || boot_failed "timed out waiting for SSH: ${label}"
     sleep 3
   done
   log "SSH is up: ${label}"
