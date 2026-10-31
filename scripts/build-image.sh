@@ -200,6 +200,7 @@ run_in_chroot "apt-get install -y --no-install-recommends \
     grub-efi-amd64-bin \
     grub-pc-bin \
     grub2-common \
+    iproute2 \
     rsync"
 
 # ---------------------------------------------------------------------------
@@ -272,7 +273,8 @@ ${ansi_dim} ------------------------------------------------------${ansi_reset}
 ${ansi_dim}  \s \r on \l${ansi_reset}
 
   ${ansi_green}panel${ansi_reset}     http://\n.local  --  http://\4
-  ${ansi_dim}gitea     http://\4:3000  --  coolify   http://\4:8000
+  ${ansi_dim}live usb  http://\4:8090 (the panel; the stack runs after install)
+  gitea     http://\4:3000  --  coolify   http://\4:8000
   login     smolofis / smolofis (ssh on port 22, change required at first login)
   install   sudo smolofis-install (to write appliance to internal disk)
   remote    sudo smolofis-tailscale up (zero-config tailscale access)${ansi_reset}
@@ -294,12 +296,22 @@ install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-identity.sh" "${ROOTFS}/
 
 # systemd orchestration units.
 install -o root -g root -m 0644 \
+    "${REPO_ROOT}/config/systemd/smolofis-tailscale-connect.service" \
     "${REPO_ROOT}/config/systemd/smolofis-panel.service" \
     "${REPO_ROOT}/config/systemd/smolofis-infrastructure.service" \
     "${REPO_ROOT}/config/systemd/smolofis-identity.service" \
     "${REPO_ROOT}/config/systemd/smolofis-identity-save.service" \
     "${REPO_ROOT}/config/systemd/smolofis-identity-save.path" \
     "${ROOTFS}/etc/systemd/system/"
+
+# Keep container logs from filling the data partition.
+install -d -m 0755 "${ROOTFS}/etc/docker"
+cat > "${ROOTFS}/etc/docker/daemon.json" <<'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" }
+}
+EOF
 
 # Application stack definition (installed to /etc/smolofis and system backup /usr/share/smolofis).
 install -d -m 0755 "${ROOTFS}/etc/smolofis" "${ROOTFS}/usr/share/smolofis"
@@ -396,6 +408,7 @@ systemctl --root="${ROOTFS}" enable \
     smolofis-infrastructure.service \
     smolofis-identity.service \
     smolofis-identity-save.path \
+    smolofis-tailscale-connect.service \
     systemd-timesyncd.service \
     docker.service \
     NetworkManager.service \

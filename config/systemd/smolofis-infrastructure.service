@@ -10,6 +10,9 @@ Documentation=https://github.com/jcyrus/smolofis
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
+# Without a data partition Docker would sit on the RAM overlay, where it cannot
+# run: the panel reports live mode and asks the operator to install instead.
+ConditionPathIsMountPoint=/var/lib/smolofis
 
 [Service]
 Type=oneshot

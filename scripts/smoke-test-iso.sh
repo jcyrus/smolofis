@@ -195,7 +195,7 @@ fi
 state="$(curl -fsS --max-time 5 "${BASE}/api/state" || true)"
 phase="$(jq -er '.phase' <<<"$state" 2>/dev/null || true)"
 case "$phase" in
-  initializing|ready|degraded)
+  initializing|ready|degraded|live)
     log "PASS  /api/state is valid JSON, phase=${phase}" ;;
   *)
     warn "FAIL  /api/state phase invalid or missing: ${state:0:200}"; fail=1 ;;

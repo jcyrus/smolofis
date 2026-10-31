@@ -33,6 +33,20 @@ case "${ACTION}" in
             printf 'Remote SSH Access:    %sssh smolofis@%s%s\n\n' "${C_INFO}" "${IP}" "${C_OFF}"
         fi
         ;;
+    autoconnect)
+        # Run at boot by smolofis-tailscale-connect.service. The key goes through
+        # a private file so that it never appears in the process list.
+        KEY="$(sed -n 's/^TAILSCALE_AUTHKEY=//p' /etc/smolofis/tailscale.env | head -n 1)"
+        [[ -n "${KEY}" ]] || exit 0
+        if tailscale status >/dev/null 2>&1; then
+            log "already connected"
+            exit 0
+        fi
+        KEY_FILE="$(mktemp)"
+        trap 'rm -f "${KEY_FILE}"' EXIT
+        printf '%s\n' "${KEY}" > "${KEY_FILE}"
+        tailscale up --auth-key="file:${KEY_FILE}" --hostname="smolofis" --ssh --accept-routes --timeout=60s
+        ;;
     down|disconnect)
         log "disconnecting from Tailscale..."
         tailscale down
