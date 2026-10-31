@@ -71,6 +71,34 @@ sudo smolofis-install --disk /dev/nvme0n1 --yes
 
 ---
 
+## 🔄 Upgrading
+
+Flash the newer ISO to a USB stick, boot from it, and run:
+
+```bash
+sudo smolofis-install --upgrade --disk /dev/nvme0n1
+```
+
+This replaces the system partition and leaves your repositories, deployments, password and SSH keys alone. Remove the USB drive and reboot. There is no automatic rollback yet, so take a backup first. Rolling back to an older version may not work once Gitea or Coolify have migrated their databases.
+
+Stack changes ship with the image, so `/etc/smolofis/docker-compose.yml` is replaced on every boot. Put local changes in `/etc/smolofis/docker-compose.override.yml`.
+
+---
+
+## 💼 Backups
+
+A nightly job archives Gitea, Coolify and the device's secrets to `/var/lib/smolofis/backups`, keeping the last 7. Gitea stops for a short time while it runs.
+
+```bash
+sudo smolofis-backup run                # back up now
+sudo smolofis-backup list               # show backups
+sudo smolofis-backup restore <name> --yes
+```
+
+Backups live on the same disk and contain secrets. Copy them somewhere safe to survive a disk failure.
+
+---
+
 ## 🌐 Zero-Config Remote Access (Tailscale)
 
 SmolOfis comes with Tailscale pre-installed. You can connect your appliance to your private encrypted mesh network (Tailnet) without opening router ports or configuring dynamic DNS:

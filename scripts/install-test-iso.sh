@@ -8,7 +8,9 @@
 #   1. boot the ISO, change the expired default password, run smolofis-install
 #   2. boot the disk with the ISO removed, change the password again
 #   3. reboot, then assert the password and SSH host key both persisted, and
-#      that Coolify, the Gitea runner and Traefik routing all work
+#      that Coolify, the Gitea runner, Traefik routing and backups all work
+#   4. boot the ISO again and run smolofis-install --upgrade
+#   5. boot the disk and assert that the upgrade kept the data
 #
 # Usage:
 #   scripts/install-test-iso.sh --iso dist/smolofis-<ver>-amd64.iso [options]
@@ -54,7 +56,7 @@ while [[ $# -gt 0 ]]; do
     --ssh-port)   SSH_PORT="$2"; shift 2 ;;
     --panel-port) PANEL_PORT="$2"; shift 2 ;;
     --proxy-port) PROXY_PORT="$2"; shift 2 ;;
-    -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
 done
@@ -180,12 +182,17 @@ shutdown_vm() {
   stop_vm
 }
 
+# An explicit boot index: on the upgrade boot, the firmware must pick the USB
+# image over the installed disk.
+# shellcheck disable=SC2054
+ISO_ARGS=(-drive "file=${ISO},if=none,id=usb,media=cdrom,readonly=on" -device ide-cd,drive=usb,bootindex=0)
+
 qemu-img create -f raw "$DISK" 24G >/dev/null
 
 # ---------------------------------------------------------------------------
 # Stage 1 — live boot and install
 # ---------------------------------------------------------------------------
-boot_vm "live ISO" -cdrom "$ISO" -boot order=d
+boot_vm "live ISO" "${ISO_ARGS[@]}"
 
 change_expired_password "$DEFAULT_PASSWORD" "$LIVE_PASSWORD"
 guest "$LIVE_PASSWORD" true || die "forced password change did not take effect on the live image"
@@ -313,5 +320,71 @@ log "PASS  Coolify registration is closed"
 guest "$FINAL_PASSWORD" "sudo smolofis-admin show" | grep -q '^Coolify' || die "smolofis-admin show failed"
 guest "$FINAL_PASSWORD" "id smolofis-panel" | grep -qv docker || die "panel user is still in the docker group"
 log "PASS  panel has no Docker access"
+
+# ---------------------------------------------------------------------------
+# Backup and restore
+# ---------------------------------------------------------------------------
+gitea_api() {
+  guest "$FINAL_PASSWORD" "sudo sh -c '. /etc/smolofis/admin.env; curl -fsS -u \"\$SMOLOFIS_ADMIN_USER:\$GITEA_ADMIN_PASSWORD\" -H content-type:application/json $1'"
+}
+
+wait_gitea() {
+  local deadline=$(( SECONDS + 180 ))
+  until guest "$FINAL_PASSWORD" "curl -fsS http://127.0.0.1:3000/api/healthz" >/dev/null 2>&1; do
+    (( SECONDS < deadline )) || die "Gitea did not come back"
+    sleep 3
+  done
+}
+
+gitea_api "-d {\\\"name\\\":\\\"keepme\\\"} http://127.0.0.1:3000/api/v1/user/repos" >/dev/null \
+  || die "could not create the test repository"
+guest "$FINAL_PASSWORD" "sudo smolofis-backup run" >/dev/null || die "backup failed"
+wait_gitea
+backup="$(guest "$FINAL_PASSWORD" "sudo smolofis-backup list" | tail -n 1)"
+[[ -n "$backup" ]] || die "backup was not listed"
+log "PASS  backup created: ${backup}"
+
+gitea_api "-X DELETE http://127.0.0.1:3000/api/v1/repos/smolofis/keepme" >/dev/null \
+  || die "could not delete the test repository"
+guest "$FINAL_PASSWORD" "sudo smolofis-backup restore ${backup} --yes" >/dev/null || die "restore failed"
+wait_gitea
+gitea_api "http://127.0.0.1:3000/api/v1/repos/smolofis/keepme" >/dev/null \
+  || die "restore did not bring the repository back"
+log "PASS  restore brought a deleted repository back"
+
+deadline=$(( SECONDS + 300 ))
+until curl -fsS --max-time 5 "http://127.0.0.1:${PROXY_PORT}/api/state" | grep -q '"phase":"ready"'; do
+  (( SECONDS < deadline )) || die "stack did not recover after the restore"
+  sleep 5
+done
+log "PASS  stack recovered after the restore"
+
+shutdown_vm "$FINAL_PASSWORD"
+
+# ---------------------------------------------------------------------------
+# Stage 4 — upgrade from the USB image
+# ---------------------------------------------------------------------------
+boot_vm "live ISO (upgrade)" "${ISO_ARGS[@]}"
+
+change_expired_password "$DEFAULT_PASSWORD" "$LIVE_PASSWORD"
+guest "$LIVE_PASSWORD" "sudo smolofis-install --upgrade --disk /dev/vda --yes" \
+  || die "smolofis-install --upgrade failed"
+log "PASS  upgrade completed from the USB image"
+
+shutdown_vm "$LIVE_PASSWORD"
+
+# ---------------------------------------------------------------------------
+# Stage 5 — the upgraded disk kept its data
+# ---------------------------------------------------------------------------
+boot_vm "installed disk (after upgrade)"
+
+guest "$FINAL_PASSWORD" true || die "the password did not survive the upgrade"
+[[ "$(host_key_fingerprint)" == "$installed_key" ]] || die "the SSH host key did not survive the upgrade"
+log "PASS  password and SSH host key survived the upgrade"
+
+wait_gitea
+gitea_api "http://127.0.0.1:3000/api/v1/repos/smolofis/keepme" >/dev/null \
+  || die "the repository did not survive the upgrade"
+log "PASS  repository survived the upgrade"
 
 log "install test PASSED (${FIRMWARE})"

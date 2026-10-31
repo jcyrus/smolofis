@@ -127,11 +127,6 @@ else
              "${PERSIST_DIR}/home"
     chmod 0700 "${PERSIST_DIR}/var/lib/tailscale"
 
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-    if [[ -f "${REPO_ROOT}/config/docker/docker-compose.yml" ]]; then
-      cp "${REPO_ROOT}/config/docker/docker-compose.yml" "${PERSIST_DIR}/etc/smolofis/docker-compose.yml"
-    fi
     cat > "${PERSIST_DIR}/persistence.conf" <<'EOF'
 /var/lib/docker bind
 /var/lib/containerd bind

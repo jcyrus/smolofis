@@ -163,11 +163,8 @@ EOF
 # ---------------------------------------------------------------------------
 install -d -m 0755 "${CONF_ROOT}"
 
-# If /etc/smolofis is a fresh persistent bind mount, restore the compose definition from system image
-if [[ ! -s "${CONF_ROOT}/docker-compose.yml" && -f /usr/share/smolofis/docker-compose.yml ]]; then
-    log "restoring docker-compose.yml from /usr/share/smolofis/docker-compose.yml"
-    cp /usr/share/smolofis/docker-compose.yml "${CONF_ROOT}/docker-compose.yml"
-fi
+# /etc/smolofis is persistent, but the stack definition belongs to the image.
+install -m 0644 /usr/share/smolofis/docker-compose.yml "${CONF_ROOT}/docker-compose.yml"
 
 if [[ -s "${SECRETS_FILE}" ]]; then
     log "secrets already provisioned at ${SECRETS_FILE} — leaving untouched"
@@ -222,12 +219,15 @@ if [[ ${DOCKER_READY} -eq 1 ]]; then
         || docker network create --attachable coolify >/dev/null
 fi
 
-if [[ -f "${CACHE_TAR}" && ! -f "${LOAD_MARKER}" ]]; then
+IMAGE_VERSION="$(cat /etc/smolofis-release)"
+
+# The marker holds the image version, so an upgrade loads its new images.
+if [[ -f "${CACHE_TAR}" && "$(cat "${LOAD_MARKER}" 2>/dev/null || true)" != "${IMAGE_VERSION}" ]]; then
     log "found pre-cached container image bundle at ${CACHE_TAR}"
     if [[ ${DOCKER_READY} -eq 1 ]]; then
         log "loading pre-cached Docker images into local container engine..."
         if docker load -i "${CACHE_TAR}"; then
-            touch "${LOAD_MARKER}"
+            printf '%s\n' "${IMAGE_VERSION}" > "${LOAD_MARKER}"
             log "pre-cached Docker images successfully loaded"
         else
             log "WARNING: docker load failed; will fall back to compose network pull"

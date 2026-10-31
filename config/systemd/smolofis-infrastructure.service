@@ -17,6 +17,8 @@ ConditionPathIsMountPoint=/var/lib/smolofis
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# Compose picks up docker-compose.yml from the image, plus an operator's
+# docker-compose.override.yml when one exists.
 WorkingDirectory=/etc/smolofis
 
 # Generates per-device secrets and persistent storage tracks (idempotent).
@@ -25,12 +27,12 @@ ExecStartPre=/usr/local/bin/smolofis-firstboot
 # Traefik first, so ports 80 and 443 answer while the stack comes up. Failure
 # here must not stop the stack; the panel stays reachable on port 8090.
 ExecStart=-/usr/bin/docker compose --project-name coolify-proxy --file /data/coolify/proxy/docker-compose.yml up --detach
-ExecStart=/usr/bin/docker compose --project-name smolofis --file /etc/smolofis/docker-compose.yml up --detach --remove-orphans
+ExecStart=/usr/bin/docker compose --project-name smolofis up --detach --remove-orphans
 # Claims the admin accounts, then closes port 8090. Failure must not take the
 # stack down, and it leaves the port open for diagnosis.
 ExecStartPost=-/usr/local/bin/smolofis-admin provision
 
-ExecStop=/usr/bin/docker compose --project-name smolofis --file /etc/smolofis/docker-compose.yml stop
+ExecStop=/usr/bin/docker compose --project-name smolofis stop
 
 # First boot pulls ~2 GB of images on slow office links.
 TimeoutStartSec=1800
