@@ -39,7 +39,6 @@ services:
       - "2222:22"     # git over ssh
     volumes:
       - /var/lib/smolofis/gitea:/data
-      - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:3000/api/healthz"]

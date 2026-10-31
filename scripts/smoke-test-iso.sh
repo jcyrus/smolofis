@@ -127,14 +127,7 @@ else
              "${PERSIST_DIR}/home"
     chmod 0700 "${PERSIST_DIR}/var/lib/tailscale"
 
-    cat > "${PERSIST_DIR}/persistence.conf" <<'EOF'
-/var/lib/docker bind
-/var/lib/containerd bind
-/var/lib/smolofis bind
-/var/lib/tailscale bind
-/etc/smolofis bind
-/home bind
-EOF
+    cp "$(dirname "${BASH_SOURCE[0]}")/../config/system/persistence.conf" "${PERSIST_DIR}/persistence.conf"
     qemu-img create -f raw "${SCRATCH_DISK}" 10G >/dev/null
     mkfs.ext4 -F -q -L "persistence" -d "${PERSIST_DIR}" "${SCRATCH_DISK}"
     EXTRA_QEMU_ARGS+=(-drive "file=${SCRATCH_DISK},format=raw,if=virtio")
@@ -184,7 +177,7 @@ health="$(curl -fsS --max-time 5 "${BASE}/healthz" || true)"
 if [[ "$health" == "ok" ]]; then
   log "PASS  /healthz -> ok"
 else
-  warn "FAIL  /healthz returned: ${health:-<nothing>}"; fail=1
+  warn "FAIL  /healthz returned: ${health:-<nothing>}"; fail=$(( fail + 1 ))
 fi
 
 state="$(curl -fsS --max-time 5 "${BASE}/api/state" || true)"
@@ -193,28 +186,28 @@ case "$phase" in
   initializing|ready|degraded|live)
     log "PASS  /api/state is valid JSON, phase=${phase}" ;;
   *)
-    warn "FAIL  /api/state phase invalid or missing: ${state:0:200}"; fail=1 ;;
+    warn "FAIL  /api/state phase invalid or missing: ${state:0:200}"; fail=$(( fail + 1 )) ;;
 esac
 
 ver="$(jq -er '.panel.version' <<<"$state" 2>/dev/null || true)"
 if [[ -n "$ver" && "$ver" != "null" ]]; then
   log "PASS  panel reports version ${ver}"
 else
-  warn "FAIL  /api/state missing panel.version"; fail=1
+  warn "FAIL  /api/state missing panel.version"; fail=$(( fail + 1 ))
 fi
 
 home="$(curl -fsS --max-time 5 "${BASE}/" || true)"
 if grep -qi 'smolofis' <<<"$home"; then
   log "PASS  GET / renders the dashboard"
 else
-  warn "FAIL  GET / did not contain the SmolOfis dashboard"; fail=1
+  warn "FAIL  GET / did not contain the SmolOfis dashboard"; fail=$(( fail + 1 ))
 fi
 
 css_code="$(curl -fsS --max-time 5 -o /dev/null -w '%{http_code}' "${BASE}/assets/app.css" || true)"
 if [[ "$css_code" == "200" ]]; then
   log "PASS  embedded stylesheet served (HTTP 200)"
 else
-  warn "FAIL  /assets/app.css returned HTTP ${css_code}"; fail=1
+  warn "FAIL  /assets/app.css returned HTTP ${css_code}"; fail=$(( fail + 1 ))
 fi
 
 if [[ ${TEST_STACK} -eq 1 ]]; then
@@ -253,19 +246,19 @@ if [[ ${TEST_STACK} -eq 1 ]]; then
     if [[ "$docker_status" == "online" ]]; then
       log "PASS  docker engine probe -> online"
     else
-      warn "FAIL  docker engine health probe returned: ${docker_status}"; fail=1
+      warn "FAIL  docker engine health probe returned: ${docker_status}"; fail=$(( fail + 1 ))
     fi
 
     if [[ "$gitea_status" == "online" ]]; then
       log "PASS  gitea health probe -> online"
     else
-      warn "FAIL  gitea health probe returned: ${gitea_status}"; fail=1
+      warn "FAIL  gitea health probe returned: ${gitea_status}"; fail=$(( fail + 1 ))
     fi
 
     if [[ "$coolify_status" == "online" ]]; then
       log "PASS  coolify health probe -> online"
     else
-      warn "FAIL  coolify health probe returned: ${coolify_status}"; fail=1
+      warn "FAIL  coolify health probe returned: ${coolify_status}"; fail=$(( fail + 1 ))
     fi
 
     # Traefik serves port 80, and an unclaimed host falls through to the panel.
@@ -273,14 +266,14 @@ if [[ ${TEST_STACK} -eq 1 ]]; then
     if [[ "$proxied" == "ok" ]]; then
       log "PASS  Traefik on port 80 routes to the panel"
     else
-      warn "FAIL  Traefik did not reach the panel: ${proxied:-<nothing>}"; fail=1
+      warn "FAIL  Traefik did not reach the panel: ${proxied:-<nothing>}"; fail=$(( fail + 1 ))
     fi
   else
     warn "FAIL  compose stack timed out waiting for ready (last phase: ${current_phase:-unknown})"
     if [[ -n "${current_state}" ]]; then
       warn "last reported state: ${current_state}"
     fi
-    fail=1
+    fail=$(( fail + 1 ))
   fi
 fi
 

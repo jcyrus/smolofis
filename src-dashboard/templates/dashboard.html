@@ -220,7 +220,7 @@
           <p class="text-[10px] uppercase tracking-[0.3em] text-dim">Uptime</p>
           <p class="mt-3 font-display text-4xl font-semibold" id="m-uptime">{{ uptime }}</p>
           <div class="bar-track mt-4"><div class="bar-fill" style="width: 100%"></div></div>
-          <p class="mt-2 text-[11px] text-dim">panel v<span>{{ version }}</span></p>
+          <p class="mt-2 text-[11px] text-dim">image <span>{{ image_version }}</span></p>
         </div>
 
       </div>
@@ -261,6 +261,7 @@
     <footer class="reveal mt-12 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-edge pt-5 text-[11px] uppercase tracking-[0.25em] text-dim">
       <span>smolofis appliance</span>
       <span>mdns: smolofis.local</span>
+      <span>slot: {{ boot_slot }}</span>
       <span class="ml-auto">last sync <span id="sync-age" class="text-fg">0s</span> ago</span>
     </footer>
   </div>

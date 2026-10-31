@@ -1,0 +1,6 @@
+[advisories]
+ignore = [
+    # Unmaintained, with no replacement released. askama's macros read their
+    # config with it at compile time, so it never reaches the binary.
+    { id = "RUSTSEC-2026-0374", reason = "compile-time only dependency of askama_derive" },
+]

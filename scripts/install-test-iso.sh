@@ -484,4 +484,9 @@ boot_vm "corrupted slot, expecting rollback"
 [[ "$(slot_status booted)" == "system-b" ]] || die "rollback did not return to system-b"
 log "PASS  a failed update rolled back to the previous slot"
 
+bundle="$(guest "$FINAL_PASSWORD" "sudo smolofis-support" | tail -n 1)"
+guest "$FINAL_PASSWORD" "sudo sh -c '. /etc/smolofis/admin.env; . /etc/smolofis/runner.env; mkdir /tmp/support && tar -xzf ${bundle} -C /tmp/support && test -s /tmp/support/journal.txt && ! grep -rqF -e \"\$GITEA_ADMIN_PASSWORD\" -e \"\$COOLIFY_ADMIN_PASSWORD\" -e \"\$GITEA_RUNNER_REGISTRATION_TOKEN\" /tmp/support'" \
+  || die "support bundle is missing data or contains a secret"
+log "PASS  support bundle works and contains no secrets"
+
 log "install test PASSED (${FIRMWARE})"
