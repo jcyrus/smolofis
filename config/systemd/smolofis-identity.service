@@ -11,6 +11,8 @@ Before=ssh.service getty.target systemd-user-sessions.service
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/local/bin/smolofis-identity restore
+# A second chance at a normal shutdown, if the path unit missed a change.
+ExecStop=/usr/local/bin/smolofis-identity save
 
 [Install]
 WantedBy=ssh.service multi-user.target

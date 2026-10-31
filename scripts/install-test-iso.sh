@@ -317,7 +317,13 @@ installed_key="$(host_key_fingerprint)"
 
 deadline=$(( SECONDS + 30 ))
 until guest "$FINAL_PASSWORD" "sudo test -s /etc/smolofis/identity/operator-password.hash"; do
-  (( SECONDS < deadline )) || die "operator password was not saved to persistent storage"
+  if (( SECONDS >= deadline )); then
+    guest "$FINAL_PASSWORD" "systemctl --no-pager status smolofis-identity-save.path smolofis-identity-save.service smolofis-identity.service; \
+      sudo journalctl -b --no-pager -u smolofis-identity-save.path -u smolofis-identity-save.service -u smolofis-identity.service; \
+      sudo sh -c 'getent shadow smolofis | cut -d: -f3; ls -la /etc/shadow /etc/smolofis/identity; findmnt /etc/smolofis'; \
+      systemd-analyze critical-chain systemd-user-sessions.service" 2>&1 || true
+    die "operator password was not saved to persistent storage"
+  fi
   sleep 2
 done
 log "PASS  operator password saved to persistent storage"
