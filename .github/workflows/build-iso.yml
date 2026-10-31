@@ -249,6 +249,6 @@ jobs:
             --notes "$(cat <<'EOF'
           Rolling build of the `main` branch.
           Flash with: `dd if=smolofis-*.iso of=/dev/sdX bs=4M status=progress conv=fsync`
-          Then browse to **http://smolofis.local**.
+          Then browse to **http://smolofis.local:8090** and run `sudo smolofis-install`.
           EOF
           )"

@@ -1,0 +1,17 @@
+# Joins the Tailnet from /etc/smolofis/tailscale.env. Kept apart from the
+# application stack so that a network outage can never delay it.
+
+[Unit]
+Description=SmolOfis Tailscale auto-connect
+Documentation=https://github.com/jcyrus/smolofis
+After=tailscaled.service network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/smolofis/tailscale.env
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/smolofis-tailscale autoconnect
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target

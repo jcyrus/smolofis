@@ -21,6 +21,11 @@ pub struct Config {
     pub coolify_url: String,
     /// Health endpoint path on the Coolify instance.
     pub coolify_health_path: String,
+    /// Where appliance state lives. When set, the disk gauge follows this path,
+    /// and live mode is reported unless a partition is mounted here.
+    pub data_path: Option<PathBuf>,
+    /// Uptime after which a stack that never came up counts as degraded.
+    pub boot_timeout: Duration,
     /// Docker engine control socket, pinged to verify the engine is up.
     pub docker_socket: PathBuf,
     /// Interval between health/metric refresh cycles.
@@ -39,6 +44,11 @@ impl Config {
             gitea_health_path: env_or("SMOLOFIS_GITEA_HEALTH_PATH", "/api/healthz"),
             coolify_url: env_or("SMOLOFIS_COOLIFY_URL", "http://127.0.0.1:8000"),
             coolify_health_path: env_or("SMOLOFIS_COOLIFY_HEALTH_PATH", "/api/health"),
+            data_path: std::env::var("SMOLOFIS_DATA_PATH")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .map(PathBuf::from),
+            boot_timeout: Duration::from_secs(env_parsed("SMOLOFIS_BOOT_TIMEOUT_SECS", 900u64)),
             docker_socket: PathBuf::from(env_or("SMOLOFIS_DOCKER_SOCKET", "/var/run/docker.sock")),
             poll_interval: Duration::from_secs(env_parsed("SMOLOFIS_POLL_INTERVAL_SECS", 3u64)),
             gitea_public_port: env_parsed("SMOLOFIS_GITEA_PUBLIC_PORT", 3000u16),

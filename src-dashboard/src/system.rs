@@ -6,7 +6,7 @@
 //! Coolify. A single background task refreshes everything on a fixed
 //! cadence; HTTP handlers only ever read the latest immutable snapshot.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -26,8 +26,10 @@ pub enum BootPhase {
     Initializing,
     /// Every core service is healthy.
     Ready,
-    /// The appliance was `Ready` at some point, but a core service dropped.
+    /// A core service dropped after `Ready`, or the stack never came up in time.
     Degraded,
+    /// No data partition: the USB image, where the stack cannot run.
+    Live,
 }
 
 impl BootPhase {
@@ -36,6 +38,7 @@ impl BootPhase {
             BootPhase::Initializing => "initializing",
             BootPhase::Ready => "ready",
             BootPhase::Degraded => "degraded",
+            BootPhase::Live => "live",
         }
     }
 
@@ -44,6 +47,7 @@ impl BootPhase {
             BootPhase::Initializing => "INITIALIZING",
             BootPhase::Ready => "OPERATIONAL",
             BootPhase::Degraded => "DEGRADED",
+            BootPhase::Live => "LIVE MODE",
         }
     }
 }
@@ -88,6 +92,8 @@ pub struct Metrics {
     pub load_one: f64,
     pub hostname: String,
     pub tailscale_ip: Option<String>,
+    /// A partition is mounted at the configured data path.
+    pub persistent: bool,
 }
 
 /// Immutable view of the whole appliance, swapped atomically each cycle.
@@ -126,29 +132,37 @@ impl Snapshot {
 /// short blocking lock and read fresh telemetry.
 struct Monitor {
     sys: System,
+    data_path: Option<PathBuf>,
 }
 
 impl Monitor {
-    fn new() -> Self {
+    fn new(data_path: Option<PathBuf>) -> Self {
         let sys = System::new_with_specifics(
             RefreshKind::nothing()
                 .with_cpu(CpuRefreshKind::nothing().with_cpu_usage())
                 .with_memory(MemoryRefreshKind::nothing().with_ram()),
         );
-        Self { sys }
+        Self { sys, data_path }
     }
 
     fn sample(&mut self) -> Metrics {
         self.sys.refresh_cpu_usage();
         self.sys.refresh_memory();
 
-        // Query the root filesystem directly; avoid summing transient overlay/container mounts.
+        // Report the filesystem holding the data path; avoid summing transient
+        // overlay/container mounts. `/` alone would be the RAM overlay.
         let disks = Disks::new_with_refreshed_list();
+        let target = self.data_path.as_deref().unwrap_or(Path::new("/"));
+        let mount = containing_mount(target, disks.list().iter().map(|d| d.mount_point()));
         let primary_disk = disks
             .list()
             .iter()
-            .find(|d| d.mount_point() == Path::new("/"))
+            .find(|d| Some(d.mount_point()) == mount)
             .or_else(|| disks.list().first());
+        let persistent = self
+            .data_path
+            .as_deref()
+            .is_none_or(|path| mount == Some(path));
 
         let (disk_total, disk_avail) = match primary_disk {
             Some(d) => (d.total_space(), d.available_space()),
@@ -177,6 +191,7 @@ impl Monitor {
             load_one: System::load_average().one,
             hostname: System::host_name().unwrap_or_else(|| "smolofis".to_string()),
             tailscale_ip,
+            persistent,
         }
     }
 }
@@ -200,11 +215,11 @@ impl AppState {
             .build()
             .expect("reqwest client construction cannot fail with static config");
         Self {
-            config,
             http,
             snapshot: RwLock::new(Snapshot::boot_default()),
-            monitor: Mutex::new(Monitor::new()),
+            monitor: Mutex::new(Monitor::new(config.data_path.clone())),
             ever_ready: AtomicBool::new(false),
+            config,
         }
     }
 
@@ -239,7 +254,13 @@ impl AppState {
         let services = vec![docker, gitea, coolify];
 
         let all_online = services.iter().all(|s| s.health == ServiceHealth::Online);
-        let phase = decide_phase(all_online, &self.ever_ready);
+        let boot_expired = metrics.uptime_secs >= self.config.boot_timeout.as_secs();
+        let phase = decide_phase(
+            all_online,
+            metrics.persistent,
+            boot_expired,
+            &self.ever_ready,
+        );
 
         let mut snap = self.snapshot.write().await;
         if snap.phase != phase {
@@ -340,16 +361,31 @@ pub fn spawn_poller(state: Arc<AppState>) {
 /// it can be exercised in isolation. `ever_ready` latches the first instant
 /// every core service is simultaneously online — that latch is what separates
 /// a cold boot still coming up (`Initializing`) from a healthy appliance that
-/// later lost a service (`Degraded`).
-fn decide_phase(all_online: bool, ever_ready: &AtomicBool) -> BootPhase {
-    if all_online {
+/// later lost a service (`Degraded`). `boot_expired` uses host uptime, so a
+/// stack that never came up surfaces as `Degraded`, even after a panel restart.
+fn decide_phase(
+    all_online: bool,
+    persistent: bool,
+    boot_expired: bool,
+    ever_ready: &AtomicBool,
+) -> BootPhase {
+    if !persistent {
+        BootPhase::Live
+    } else if all_online {
         ever_ready.store(true, Ordering::Relaxed);
         BootPhase::Ready
-    } else if ever_ready.load(Ordering::Relaxed) {
+    } else if boot_expired || ever_ready.load(Ordering::Relaxed) {
         BootPhase::Degraded
     } else {
         BootPhase::Initializing
     }
+}
+
+/// The longest mount point containing `target`.
+fn containing_mount<'a>(target: &Path, mounts: impl Iterator<Item = &'a Path>) -> Option<&'a Path> {
+    mounts
+        .filter(|mount| target.starts_with(mount))
+        .max_by_key(|mount| mount.as_os_str().len())
 }
 
 async fn ping_docker_socket(socket: &Path) -> Result<(), String> {
@@ -411,7 +447,6 @@ mod tests {
     use axum::routing::get;
     use axum::Router;
     use std::net::SocketAddr;
-    use std::path::PathBuf;
 
     fn base_config() -> Config {
         Config {
@@ -420,6 +455,8 @@ mod tests {
             gitea_health_path: "/api/healthz".to_string(),
             coolify_url: "http://127.0.0.1:0".to_string(),
             coolify_health_path: "/api/health".to_string(),
+            data_path: None,
+            boot_timeout: Duration::from_secs(900),
             docker_socket: PathBuf::from("/nonexistent/smolofis-docker.sock"),
             poll_interval: Duration::from_secs(3),
             gitea_public_port: 3000,
@@ -432,32 +469,74 @@ mod tests {
     #[test]
     fn phase_starts_initializing_before_first_ready() {
         let latch = AtomicBool::new(false);
-        assert_eq!(decide_phase(false, &latch), BootPhase::Initializing);
+        assert_eq!(
+            decide_phase(false, true, false, &latch),
+            BootPhase::Initializing
+        );
         assert!(!latch.load(Ordering::Relaxed));
     }
 
     #[test]
     fn phase_becomes_ready_and_latches() {
         let latch = AtomicBool::new(false);
-        assert_eq!(decide_phase(true, &latch), BootPhase::Ready);
+        assert_eq!(decide_phase(true, true, false, &latch), BootPhase::Ready);
         assert!(latch.load(Ordering::Relaxed), "ready must latch ever_ready");
     }
 
     #[test]
     fn phase_degrades_only_after_having_been_ready() {
         let latch = AtomicBool::new(false);
-        assert_eq!(decide_phase(true, &latch), BootPhase::Ready);
+        assert_eq!(decide_phase(true, true, false, &latch), BootPhase::Ready);
         // A service drops after the appliance was healthy -> Degraded, not back
         // to Initializing.
-        assert_eq!(decide_phase(false, &latch), BootPhase::Degraded);
+        assert_eq!(
+            decide_phase(false, true, false, &latch),
+            BootPhase::Degraded
+        );
     }
 
     #[test]
     fn phase_recovers_from_degraded_to_ready() {
         let latch = AtomicBool::new(false);
-        decide_phase(true, &latch);
-        assert_eq!(decide_phase(false, &latch), BootPhase::Degraded);
-        assert_eq!(decide_phase(true, &latch), BootPhase::Ready);
+        decide_phase(true, true, false, &latch);
+        assert_eq!(
+            decide_phase(false, true, false, &latch),
+            BootPhase::Degraded
+        );
+        assert_eq!(decide_phase(true, true, false, &latch), BootPhase::Ready);
+    }
+
+    #[test]
+    fn phase_is_live_without_a_data_partition() {
+        let latch = AtomicBool::new(false);
+        assert_eq!(decide_phase(true, false, true, &latch), BootPhase::Live);
+        assert!(!latch.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn phase_degrades_when_the_boot_window_expires() {
+        let latch = AtomicBool::new(false);
+        assert_eq!(decide_phase(false, true, true, &latch), BootPhase::Degraded);
+        assert_eq!(decide_phase(true, true, true, &latch), BootPhase::Ready);
+    }
+
+    #[test]
+    fn containing_mount_prefers_the_longest_match() {
+        let mounts = [
+            Path::new("/"),
+            Path::new("/var/lib"),
+            Path::new("/var/lib/smolofis"),
+            Path::new("/var/lib/smolofis-other"),
+        ];
+        let found = containing_mount(Path::new("/var/lib/smolofis"), mounts.into_iter());
+        assert_eq!(found, Some(Path::new("/var/lib/smolofis")));
+    }
+
+    #[test]
+    fn containing_mount_falls_back_to_root_for_an_unmounted_path() {
+        let mounts = [Path::new("/"), Path::new("/home")];
+        let found = containing_mount(Path::new("/var/lib/smolofis"), mounts.into_iter());
+        assert_eq!(found, Some(Path::new("/")));
     }
 
     // ---- serde / string contract the frontend + JSON API depend on --------
@@ -468,6 +547,7 @@ mod tests {
             BootPhase::Initializing,
             BootPhase::Ready,
             BootPhase::Degraded,
+            BootPhase::Live,
         ] {
             assert_eq!(
                 serde_json::to_value(phase).unwrap(),

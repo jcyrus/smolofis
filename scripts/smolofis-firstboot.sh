@@ -20,36 +20,15 @@ rand_hex() { head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 rand_b64() { head -c "$1" /dev/urandom | base64 | tr -d '\n'; }
 
 # ---------------------------------------------------------------------------
-# Storage auto-detection & persistent tracks
+# Persistent tracks
 # ---------------------------------------------------------------------------
-# If /var/lib/smolofis is currently unmounted and a partition labeled
-# SMOLOFIS_DATA exists (or an unmounted persistence partition), mount it.
-if ! mountpoint -q "${STATE_ROOT}" 2>/dev/null; then
-    PERSIST_DEV=""
-    if [[ -b /dev/disk/by-label/SMOLOFIS_DATA ]]; then
-        PERSIST_DEV="/dev/disk/by-label/SMOLOFIS_DATA"
-    elif [[ -b /dev/disk/by-label/persistence ]]; then
-        # Only attempt direct mount if not already in use by live-boot persistence layer
-        if ! grep -qsE 'persistence|live' /proc/mounts; then
-            PERSIST_DEV="/dev/disk/by-label/persistence"
-        fi
-    fi
-
-    if [[ -n "${PERSIST_DEV}" ]]; then
-        log "mounting persistent data partition (${PERSIST_DEV}) at ${STATE_ROOT}"
-        install -d -m 0755 "${STATE_ROOT}"
-        mount "${PERSIST_DEV}" "${STATE_ROOT}" || log "NOTICE: partition ${PERSIST_DEV} already mounted or busy"
-    else
-        log "NOTICE: persistent storage already active or operating in memory mode"
-    fi
-fi
-
 log "ensuring persistent storage tracks under ${STATE_ROOT}"
 install -d -m 0755 "${STATE_ROOT}"
 
-# Gitea runs as UID 1000:GID 1000 inside the container.
+# Gitea runs as UID 1000:GID 1000 inside the container. Ownership is only set
+# on the top directories: this runs every boot, and apps own what they write.
 install -d -m 0750 "${STATE_ROOT}/gitea"
-chown -R 1000:1000 "${STATE_ROOT}/gitea"
+chown 1000:1000 "${STATE_ROOT}/gitea"
 
 # Gitea Actions Runner persistent session data.
 install -d -m 0755 "${STATE_ROOT}/gitea-runner"
@@ -91,8 +70,8 @@ chmod 0600 /root/.ssh/authorized_keys
 grep -qxFf "${COOLIFY_KEY}.pub" /root/.ssh/authorized_keys \
     || cat "${COOLIFY_KEY}.pub" >> /root/.ssh/authorized_keys
 
-chown -R 9999:0 "${STATE_ROOT}/coolify/ssh" \
-    "${STATE_ROOT}/coolify/applications" \
+chown -R 9999:0 "${STATE_ROOT}/coolify/ssh"
+chown 9999:0 "${STATE_ROOT}/coolify/applications" \
     "${STATE_ROOT}/coolify/databases" \
     "${STATE_ROOT}/coolify/services" \
     "${STATE_ROOT}/coolify/backups" \
@@ -255,22 +234,6 @@ if [[ -f "${CACHE_TAR}" && ! -f "${LOAD_MARKER}" ]]; then
         fi
     else
         log "WARNING: docker daemon not responding in time; will fall back to compose network pull"
-    fi
-fi
-
-# ---------------------------------------------------------------------------
-# Zero-touch Tailscale auto-connect (if key provided via env file)
-# ---------------------------------------------------------------------------
-TAILSCALE_ENV="${CONF_ROOT}/tailscale.env"
-if [[ -f "${TAILSCALE_ENV}" ]]; then
-    # shellcheck disable=SC1090
-    source "${TAILSCALE_ENV}"
-fi
-
-if [[ -n "${TAILSCALE_AUTHKEY:-}" ]]; then
-    log "found TAILSCALE_AUTHKEY; attempting automated Tailscale connection..."
-    if command -v tailscale >/dev/null 2>&1; then
-        tailscale up --authkey="${TAILSCALE_AUTHKEY}" --hostname="smolofis" --ssh --accept-routes 2>&1 | log || true
     fi
 fi
 

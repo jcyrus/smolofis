@@ -25,6 +25,7 @@ SupplementaryGroups=docker
 Environment=SMOLOFIS_BIND=0.0.0.0:8090
 Environment=SMOLOFIS_GITEA_URL=http://127.0.0.1:3000
 Environment=SMOLOFIS_COOLIFY_URL=http://127.0.0.1:8000
+Environment=SMOLOFIS_DATA_PATH=/var/lib/smolofis
 Environment=RUST_LOG=info
 
 CapabilityBoundingSet=
@@ -37,7 +38,8 @@ PrivateTmp=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# AF_NETLINK: getifaddrs needs it to read the Tailscale address.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 RestrictNamespaces=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes

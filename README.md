@@ -52,7 +52,7 @@ SmolOfis boots headless but provides full local console and SSH access:
 
 ## 💾 Installing SmolOfis to Internal Disk
 
-SmolOfis boots as a live image from USB. To permanently install the appliance onto your hardware's internal NVMe or SATA SSD:
+SmolOfis boots as a live image from USB for trying the panel and running the installer. The Gitea and Coolify stack needs a data partition, so it only starts after installing; on the USB image the panel is at `http://smolofis.local:8090` and shows `LIVE MODE`. To permanently install the appliance onto your hardware's internal NVMe or SATA SSD:
 
 1. Boot your machine from the flashed USB stick.
 2. Log in locally or via SSH (`ssh smolofis@smolofis.local`).
@@ -60,7 +60,7 @@ SmolOfis boots as a live image from USB. To permanently install the appliance on
    ```bash
    sudo smolofis-install
    ```
-4. Select your target drive (e.g. `/dev/nvme0n1`). The installer will automatically format the disk with UEFI and legacy BIOS bootloaders, the immutable system partition, and a persistent `SMOLOFIS_DATA` partition for your Gitea repos and Docker volumes.
+4. Select your target drive (e.g. `/dev/nvme0n1`). The installer will automatically format the disk with UEFI and legacy BIOS bootloaders, the immutable system partition, and a persistent data partition for your Gitea repos and Docker volumes.
 5. Reboot and unplug the USB drive.
 
 For non-interactive or automated provisioning:

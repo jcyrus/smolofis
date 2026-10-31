@@ -191,6 +191,18 @@ change_expired_password "$DEFAULT_PASSWORD" "$LIVE_PASSWORD"
 guest "$LIVE_PASSWORD" true || die "forced password change did not take effect on the live image"
 log "PASS  default password is expired and must be changed"
 
+deadline=$(( SECONDS + 60 ))
+until curl -fsS --max-time 5 "http://127.0.0.1:${PANEL_PORT}/api/state" | grep -q '"phase":"live"'; do
+  (( SECONDS < deadline )) || die "panel did not report live mode without a data partition"
+  sleep 3
+done
+log "PASS  panel reports live mode on the USB image"
+
+if guest "$LIVE_PASSWORD" "sudo smolofis-install --disk /dev/sr0 --yes" 2>/dev/null; then
+  die "smolofis-install accepted a device that is not a whole disk"
+fi
+log "PASS  installer refuses the boot media"
+
 live_key="$(host_key_fingerprint)"
 guest "$LIVE_PASSWORD" "sudo smolofis-install --disk /dev/vda --yes" \
   || die "smolofis-install failed"
@@ -242,6 +254,23 @@ until curl -fsS --max-time 5 "http://127.0.0.1:${PANEL_PORT}/api/state" | grep -
   sleep 5
 done
 log "PASS  stack is ready on the installed disk"
+
+curl -fsS --max-time 5 "http://127.0.0.1:${PANEL_PORT}/api/state" | grep -q '"persistent":true' \
+  || die "panel did not detect the data partition"
+log "PASS  panel reads the data partition"
+
+guest "$FINAL_PASSWORD" "docker inspect smolofis-gitea --format '{{.HostConfig.LogConfig.Config}}'" | grep -q 'max-size:10m' \
+  || die "container log rotation is not configured"
+log "PASS  container logs are rotated"
+
+guest "$FINAL_PASSWORD" "sudo ip addr add 100.64.0.1/32 dev tailscale0" \
+  || die "could not assign a test address to tailscale0"
+deadline=$(( SECONDS + 30 ))
+until curl -fsS --max-time 5 "http://127.0.0.1:${PANEL_PORT}/api/state" | grep -q '"tailscale_ip":"100.64.0.1"'; do
+  (( SECONDS < deadline )) || die "panel did not report the tailscale0 address"
+  sleep 3
+done
+log "PASS  panel reads the Tailscale address"
 
 curl -fsS --max-time 10 -H "Host: unclaimed.example.com" "http://127.0.0.1:${PROXY_PORT}/healthz" | grep -qx ok \
   || die "Traefik did not route an unclaimed host to the panel"

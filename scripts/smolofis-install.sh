@@ -98,10 +98,9 @@ log "found appliance live assets at: ${LIVE_SRC}"
 BOOT_MEDIUM_DEV="$(findmnt -n -o SOURCE /run/live/medium 2>/dev/null || findmnt -n -o SOURCE /lib/live/mount/medium 2>/dev/null || true)"
 BOOT_DISK=""
 if [[ -n "${BOOT_MEDIUM_DEV}" ]]; then
-    BOOT_DISK="$(lsblk -n -o PKNAME "${BOOT_MEDIUM_DEV}" 2>/dev/null || true)"
-    if [[ -n "${BOOT_DISK}" ]]; then
-        BOOT_DISK="/dev/${BOOT_DISK}"
-    fi
+    # A hybrid ISO can be mounted from the whole disk, which has no parent.
+    BOOT_PARENT="$(lsblk -d -n -o PKNAME "${BOOT_MEDIUM_DEV}" 2>/dev/null || true)"
+    BOOT_DISK="/dev/${BOOT_PARENT:-$(basename "${BOOT_MEDIUM_DEV}")}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -111,7 +110,8 @@ if [[ -z "${TARGET_DISK}" ]]; then
     printf '\n%s=== SmolOfis Bare-Metal Appliance Installer ===%s\n\n' "${C_BOLD}" "${C_OFF}"
     echo "Available storage disks on this machine:"
     echo "---------------------------------------------------------"
-    lsblk -d -o NAME,SIZE,TYPE,TRAN,MODEL | grep -E "disk|NAME" || true
+    lsblk -d -o NAME,SIZE,TYPE,TRAN,MODEL \
+        | awk -v boot="${BOOT_DISK#/dev/}" 'NR == 1 || ($3 == "disk" && $1 != boot)'
     echo "---------------------------------------------------------"
     if [[ -n "${BOOT_DISK}" ]]; then
         printf 'Note: Installer media detected at %s (excluded)\n\n' "${BOOT_DISK}"
@@ -121,6 +121,8 @@ if [[ -z "${TARGET_DISK}" ]]; then
 fi
 
 [[ -b "${TARGET_DISK}" ]] || die "target disk device '${TARGET_DISK}' does not exist or is not a block device"
+TARGET_DISK="$(readlink -f "${TARGET_DISK}")"
+[[ "$(lsblk -d -n -o TYPE "${TARGET_DISK}")" == "disk" ]] || die "'${TARGET_DISK}' is not a whole disk"
 
 if [[ -n "${BOOT_DISK}" && "${TARGET_DISK}" == "${BOOT_DISK}" ]]; then
     die "refusing to install to '${TARGET_DISK}' because it contains the active live installer medium"
@@ -271,12 +273,12 @@ set color_highlight=black/light-green
 search --no-floppy --label --set=root SMOLOFIS_SYS
 
 menuentry "SmolOfis Appliance" {
-    linux  /live/vmlinuz boot=live components persistence quiet splash loglevel=3 vga=current hostname=smolofis
+    linux  /live/vmlinuz boot=live components persistence live-media=/dev/disk/by-label/SMOLOFIS_SYS quiet splash loglevel=3 vga=current hostname=smolofis
     initrd /live/initrd.img
 }
 
 menuentry "SmolOfis Appliance (debug console)" {
-    linux  /live/vmlinuz boot=live components persistence hostname=smolofis systemd.log_level=info
+    linux  /live/vmlinuz boot=live components persistence live-media=/dev/disk/by-label/SMOLOFIS_SYS hostname=smolofis systemd.log_level=info
     initrd /live/initrd.img
 }
 EOF

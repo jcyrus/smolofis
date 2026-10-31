@@ -180,6 +180,7 @@ fn api_metrics(m: &Metrics) -> serde_json::Value {
         "load_one": m.load_one,
         "hostname": m.hostname,
         "tailscale_ip": m.tailscale_ip,
+        "persistent": m.persistent,
     })
 }
 
