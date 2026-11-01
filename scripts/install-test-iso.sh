@@ -501,6 +501,13 @@ wait_ready "before the A/B update"
 # These run after the upgrade because --base-iso may predate them.
 assert_lockdown
 
+guest "$FINAL_PASSWORD" "systemctl is-active smolofis-identity-save.path" >/dev/null \
+  || die "the password watcher is not running"
+if guest "$FINAL_PASSWORD" "sudo journalctl -b --no-pager | grep -i 'ordering cycle'"; then
+  die "systemd found an ordering cycle at boot"
+fi
+log "PASS  no ordering cycles at boot"
+
 [[ "$(guest "$FINAL_PASSWORD" "systemctl show -p RuntimeWatchdogUSec --value")" == "30s" ]] \
   || die "the runtime watchdog is not active"
 guest "$FINAL_PASSWORD" "test -e /dev/watchdog0" || die "no watchdog device"

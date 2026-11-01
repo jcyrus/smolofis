@@ -3,9 +3,8 @@
 
 [Unit]
 Description=Watch /etc/shadow for operator password changes
-After=smolofis-identity.service
-# A password changed before this starts would be lost, so hold logins until then.
-Before=systemd-user-sessions.service
+# No ordering against smolofis-identity.service: that runs after basic.target,
+# which waits for path units, so the loop makes systemd drop a job at boot.
 
 [Path]
 PathChanged=/etc/shadow
