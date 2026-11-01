@@ -1,0 +1,21 @@
+# Closes port 8090 and claims the admin accounts. Separate from the stack's unit
+# so that it still runs when compose reports an error, and restarts with it.
+
+[Unit]
+Description=SmolOfis LAN lockdown and admin accounts
+Documentation=https://github.com/jcyrus/smolofis
+Requires=docker.service
+After=docker.service smolofis-infrastructure.service
+PartOf=smolofis-infrastructure.service
+ConditionPathIsMountPoint=/var/lib/smolofis
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/smolofis-admin provision
+TimeoutStartSec=900
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

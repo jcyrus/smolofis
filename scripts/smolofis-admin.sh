@@ -44,14 +44,18 @@ wait_healthy() {
         [[ "${status}" == "healthy" ]] && return 0
         sleep 5
     done
-    die "${container} did not become healthy"
+    log "${container} did not become healthy"
+    return 1
 }
 
 provision_gitea() {
-    wait_healthy smolofis-gitea
+    local admins
+    wait_healthy smolofis-gitea || return 1
     # shellcheck disable=SC1090
     source "${ADMIN_ENV}"
-    if docker exec -u git smolofis-gitea gitea admin user list --admin | grep -q "${ADMIN_USER}"; then
+    # Read it all first: under pipefail, grep -q exiting early fails the pipe.
+    admins="$(docker exec -u git smolofis-gitea gitea admin user list --admin)" || return 1
+    if grep -q "${ADMIN_USER}" <<<"${admins}"; then
         return 0
     fi
     log "creating the Gitea admin account"
@@ -64,7 +68,7 @@ provision_gitea() {
 # fails silently offline and leaves registration open. This mirrors the seeder
 # without that check.
 provision_coolify() {
-    wait_healthy smolofis-coolify
+    wait_healthy smolofis-coolify || return 1
     log "claiming the Coolify root account and closing registration"
     docker exec --env-file "${ADMIN_ENV}" smolofis-coolify php artisan tinker --execute='
         $user = App\Models\User::find(0);
@@ -88,10 +92,18 @@ provision_coolify() {
 # Traefik reaches the panel through a Docker bridge. Rules are not persisted, so
 # a boot where the stack fails leaves port 8090 open for diagnosis.
 close_panel_port() {
-    [[ "$(docker inspect -f '{{.State.Running}}' coolify-proxy 2>/dev/null || true)" == "true" ]] || {
+    # Coolify recreates the proxy when it first connects, so one look can land in
+    # the gap between its stop and start.
+    local running=""
+    for _ in {1..24}; do
+        running="$(docker inspect -f '{{.State.Running}}' coolify-proxy 2>/dev/null || true)"
+        [[ "${running}" == "true" ]] && break
+        sleep 5
+    done
+    if [[ "${running}" != "true" ]]; then
         log "Traefik is not running; leaving port 8090 open"
         return 0
-    }
+    fi
     log "closing port 8090 to the LAN"
     nft -f - <<'EOF'
 table inet smolofis
@@ -123,11 +135,14 @@ prune_old_images() {
 
 case "${1:-}" in
     provision)
-        ensure_credentials
-        provision_gitea
-        provision_coolify
+        # The firewall goes first: a slow or failing service must not leave it open.
         close_panel_port
-        prune_old_images
+        ensure_credentials
+        failed=0
+        provision_gitea || { log "could not claim the Gitea admin account"; failed=1; }
+        provision_coolify || { log "could not claim the Coolify admin account"; failed=1; }
+        prune_old_images || log "could not prune old images"
+        [[ ${failed} -eq 0 ]] || die "lockdown incomplete"
         log "lockdown complete"
         ;;
     show)

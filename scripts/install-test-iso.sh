@@ -225,6 +225,56 @@ ISO_ARGS=(-drive "file=${ISO},if=none,id=usb,media=cdrom,readonly=on" -device id
 # shellcheck disable=SC2054
 BASE_ISO_ARGS=(-drive "file=${BASE_ISO:-$ISO},if=none,id=usb,media=cdrom,readonly=on" -device ide-cd,drive=usb,bootindex=0)
 
+assert_lockdown() {
+  local deadline
+  deadline=$(( SECONDS + 300 ))
+  until guest "$FINAL_PASSWORD" "sudo nft list table inet smolofis" >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      diagnose_guest
+      die "lockdown did not complete"
+    fi
+    sleep 5
+  done
+  if curl -fsS --max-time 5 "http://127.0.0.1:${PANEL_PORT}/healthz" >/dev/null 2>&1; then
+    die "port 8090 is still reachable from the LAN"
+  fi
+  log "PASS  port 8090 is closed to the LAN"
+
+  # The firewall closes first, so the accounts can land a little later.
+  deadline=$(( SECONDS + 300 ))
+  until guest "$FINAL_PASSWORD" "sudo sh -c '. /etc/smolofis/admin.env; curl -fsS -u \"\$SMOLOFIS_ADMIN_USER:\$GITEA_ADMIN_PASSWORD\" http://127.0.0.1:3000/api/v1/user'" 2>/dev/null \
+    | grep -q '"is_admin":true'; do
+    if (( SECONDS >= deadline )); then
+      diagnose_guest
+      die "Gitea admin login failed"
+    fi
+    sleep 5
+  done
+  log "PASS  Gitea admin account works"
+
+  deadline=$(( SECONDS + 300 ))
+  until [[ "$(guest "$FINAL_PASSWORD" "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/register")" != "200" ]]; do
+    if (( SECONDS >= deadline )); then
+      diagnose_guest
+      die "Coolify registration is still open"
+    fi
+    sleep 5
+  done
+  log "PASS  Coolify registration is closed"
+
+  guest "$FINAL_PASSWORD" "sudo smolofis-admin show" | grep -q '^Coolify' || die "smolofis-admin show failed"
+  guest "$FINAL_PASSWORD" "id smolofis-panel" | grep -qv docker || die "panel user is still in the docker group"
+  log "PASS  panel has no Docker access"
+}
+
+diagnose_guest() {
+  echo "----- guest diagnostics -----"
+  guest "$FINAL_PASSWORD" "ls -la /data/coolify/proxy/dynamic; docker ps -a; \
+    sudo journalctl -b --no-pager -n 60 -u smolofis-infrastructure -u smolofis-lockdown; \
+    docker logs --tail 20 coolify-proxy" 2>&1 || true
+  echo "-----------------------------"
+}
+
 qemu-img create -f raw "$DISK" 24G >/dev/null
 
 # ---------------------------------------------------------------------------
@@ -267,7 +317,13 @@ installed_key="$(host_key_fingerprint)"
 
 deadline=$(( SECONDS + 30 ))
 until guest "$FINAL_PASSWORD" "sudo test -s /etc/smolofis/identity/operator-password.hash"; do
-  (( SECONDS < deadline )) || die "operator password was not saved to persistent storage"
+  if (( SECONDS >= deadline )); then
+    guest "$FINAL_PASSWORD" "systemctl --no-pager status smolofis-identity-save.path smolofis-identity-save.service smolofis-identity.service; \
+      sudo journalctl -b --no-pager -u smolofis-identity-save.path -u smolofis-identity-save.service -u smolofis-identity.service; \
+      sudo sh -c 'getent shadow smolofis | cut -d: -f3; ls -la /etc/shadow /etc/smolofis/identity; findmnt /etc/smolofis'; \
+      systemd-analyze critical-chain systemd-user-sessions.service" 2>&1 || true
+    die "operator password was not saved to persistent storage"
+  fi
   sleep 2
 done
 log "PASS  operator password saved to persistent storage"
@@ -338,27 +394,10 @@ until guest "$FINAL_PASSWORD" 'docker exec smolofis-gitea-runner test -s /data/.
 done
 log "PASS  Gitea runner registered itself"
 
-deadline=$(( SECONDS + 300 ))
-until guest "$FINAL_PASSWORD" "sudo nft list table inet smolofis" >/dev/null 2>&1; do
-  (( SECONDS < deadline )) || die "lockdown did not complete"
-  sleep 5
-done
-if curl -fsS --max-time 5 "http://127.0.0.1:${PANEL_PORT}/healthz" >/dev/null 2>&1; then
-  die "port 8090 is still reachable from the LAN"
+# A --base-iso build is an older release, so its lockdown is not under test.
+if [[ -z "$BASE_ISO" ]]; then
+  assert_lockdown
 fi
-log "PASS  port 8090 is closed to the LAN"
-
-guest "$FINAL_PASSWORD" "sudo sh -c '. /etc/smolofis/admin.env; curl -fsS -u \"\$SMOLOFIS_ADMIN_USER:\$GITEA_ADMIN_PASSWORD\" http://127.0.0.1:3000/api/v1/user'" \
-  | grep -q '"is_admin":true' || die "Gitea admin login failed"
-log "PASS  Gitea admin account works"
-
-[[ "$(guest "$FINAL_PASSWORD" "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/register")" != "200" ]] \
-  || die "Coolify registration is still open"
-log "PASS  Coolify registration is closed"
-
-guest "$FINAL_PASSWORD" "sudo smolofis-admin show" | grep -q '^Coolify' || die "smolofis-admin show failed"
-guest "$FINAL_PASSWORD" "id smolofis-panel" | grep -qv docker || die "panel user is still in the docker group"
-log "PASS  panel has no Docker access"
 
 # ---------------------------------------------------------------------------
 # Backup and restore
@@ -433,15 +472,6 @@ log "PASS  repository survived the upgrade"
 # ---------------------------------------------------------------------------
 # Stage 6 — signed A/B update and rollback
 # ---------------------------------------------------------------------------
-diagnose_guest() {
-  echo "----- guest diagnostics -----"
-  guest "$FINAL_PASSWORD" "ls -la /data /data/coolify/ /data/coolify/proxy /data/coolify/proxy/dynamic; \
-    sudo systemctl --no-pager status smolofis-infrastructure | tail -n 15; docker ps -a; \
-    docker inspect -f '{{json .Mounts}}' coolify-proxy; docker logs --tail 20 coolify-proxy; \
-    curl -sS --max-time 5 http://127.0.0.1:8090/api/state" 2>&1 || true
-  echo "-----------------------------"
-}
-
 wait_ready() {
   local deadline=$(( SECONDS + TIMEOUT ))
   until curl -fsS --max-time 5 "http://127.0.0.1:${PROXY_PORT}/api/state" | grep -q '"phase":"ready"'; do
@@ -469,6 +499,15 @@ booted_slot() {
 wait_ready "before the A/B update"
 
 # These run after the upgrade because --base-iso may predate them.
+assert_lockdown
+
+guest "$FINAL_PASSWORD" "systemctl is-active smolofis-identity-save.path" >/dev/null \
+  || die "the password watcher is not running"
+if guest "$FINAL_PASSWORD" "sudo journalctl -b --no-pager | grep -i 'ordering cycle'"; then
+  die "systemd found an ordering cycle at boot"
+fi
+log "PASS  no ordering cycles at boot"
+
 [[ "$(guest "$FINAL_PASSWORD" "systemctl show -p RuntimeWatchdogUSec --value")" == "30s" ]] \
   || die "the runtime watchdog is not active"
 guest "$FINAL_PASSWORD" "test -e /dev/watchdog0" || die "no watchdog device"
