@@ -22,6 +22,9 @@ rand_b64() { head -c "$1" /dev/urandom | base64 | tr -d '\n'; }
 # ---------------------------------------------------------------------------
 # Persistent tracks
 # ---------------------------------------------------------------------------
+# Installs from before the installer set this reserve 5% of the disk for root.
+tune2fs -m 1 "$(findmnt -n -o SOURCE "${STATE_ROOT}" | sed 's/\[.*//')" >/dev/null 2>&1 || true
+
 log "ensuring persistent storage tracks under ${STATE_ROOT}"
 install -d -m 0755 "${STATE_ROOT}"
 

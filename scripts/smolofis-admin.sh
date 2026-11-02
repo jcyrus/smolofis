@@ -70,7 +70,9 @@ provision_gitea() {
 provision_coolify() {
     wait_healthy smolofis-coolify || return 1
     log "claiming the Coolify root account and closing registration"
-    docker exec --env-file "${ADMIN_ENV}" smolofis-coolify php artisan tinker --execute='
+    local lan_ip
+    lan_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')"
+    docker exec --env-file "${ADMIN_ENV}" -e "SMOLOFIS_LAN_IP=${lan_ip}" smolofis-coolify php artisan tinker --execute='
         $user = App\Models\User::find(0);
         if (! $user) {
             $user = (new App\Models\User)->forceFill([
@@ -86,6 +88,14 @@ provision_coolify() {
             }
         }
         App\Models\InstanceSettings::updateOrCreate(["id" => 0], ["is_registration_enabled" => false]);
+        // Coolify would build app domains from the public IP, which is the router.
+        // Follow the LAN IP, and leave a domain the operator chose alone.
+        $settings = App\Models\Server::find(0)->settings;
+        $ip = getenv("SMOLOFIS_LAN_IP");
+        if ($ip && (blank($settings->wildcard_domain) || preg_match("#^http://[0-9.]+\.sslip\.io$#", $settings->wildcard_domain))) {
+            $settings->wildcard_domain = "http://".$ip.".sslip.io";
+            $settings->save();
+        }
     ' >/dev/null
 }
 

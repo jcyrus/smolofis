@@ -202,6 +202,7 @@ run_in_chroot "apt-get install -y --no-install-recommends \
     grub-pc-bin \
     grub2-common \
     iproute2 \
+    whiptail \
     nftables \
     rsync"
 
@@ -310,6 +311,7 @@ install -o root -g root -m 0644 \
     "${REPO_ROOT}/config/systemd/smolofis-update-verify.service" \
     "${REPO_ROOT}/config/systemd/smolofis-live-mdns.service" \
     "${REPO_ROOT}/config/systemd/smolofis-lockdown.service" \
+    "${REPO_ROOT}/config/systemd/smolofis-installer.service" \
     "${REPO_ROOT}/config/systemd/smolofis-backup.service" \
     "${REPO_ROOT}/config/systemd/smolofis-backup.timer" \
     "${REPO_ROOT}/config/systemd/smolofis-panel.service" \
@@ -324,6 +326,12 @@ install -d -m 0755 "${ROOTFS}/etc/systemd/system.conf.d" "${ROOTFS}/etc/modules-
 install -o root -g root -m 0644 \
     "${REPO_ROOT}/config/system/watchdog.conf" "${ROOTFS}/etc/systemd/system.conf.d/smolofis-watchdog.conf"
 echo softdog > "${ROOTFS}/etc/modules-load.d/smolofis-watchdog.conf"
+
+# An appliance must never suspend, and a bumped button must not stop it.
+install -d -m 0755 "${ROOTFS}/etc/systemd/logind.conf.d"
+install -o root -g root -m 0644 \
+    "${REPO_ROOT}/config/system/logind.conf" "${ROOTFS}/etc/systemd/logind.conf.d/smolofis.conf"
+systemctl --root="${ROOTFS}" mask sleep.target suspend.target hibernate.target hybrid-sleep.target
 
 # Keep container logs from filling the data partition.
 install -d -m 0755 "${ROOTFS}/etc/docker"
@@ -443,6 +451,7 @@ systemctl --root="${ROOTFS}" enable \
     smolofis-update-verify.service \
     smolofis-live-mdns.service \
     smolofis-lockdown.service \
+    smolofis-installer.service \
     systemd-timesyncd.service \
     docker.service \
     NetworkManager.service \
