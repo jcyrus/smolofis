@@ -508,6 +508,21 @@ if guest "$FINAL_PASSWORD" "sudo journalctl -b --no-pager | grep -i 'ordering cy
 fi
 log "PASS  no ordering cycles at boot"
 
+workflow="$(printf '%s\n' 'on: [push]' 'jobs:' '  check:' '    runs-on: ubuntu-latest' '    steps:' '      - uses: actions/checkout@v4' '      - run: test -f README.md' | base64 -w0)"
+gitea_api "-d {\\\"name\\\":\\\"actions-test\\\",\\\"auto_init\\\":true,\\\"default_branch\\\":\\\"main\\\"} http://127.0.0.1:3000/api/v1/user/repos" >/dev/null \
+  || die "could not create the Actions test repository"
+gitea_api "-d {\\\"content\\\":\\\"${workflow}\\\",\\\"message\\\":\\\"add\\\",\\\"branch\\\":\\\"main\\\"} http://127.0.0.1:3000/api/v1/repos/smolofis/actions-test/contents/.gitea/workflows/check.yml" >/dev/null \
+  || die "could not add the Actions test workflow"
+deadline=$(( SECONDS + 300 ))
+until gitea_api "http://127.0.0.1:3000/api/v1/repos/smolofis/actions-test/actions/runs" | grep -q '"conclusion":"success"'; do
+  if (( SECONDS >= deadline )); then
+    diagnose_guest
+    die "the Gitea Actions job did not succeed"
+  fi
+  sleep 5
+done
+log "PASS  a Gitea Actions job checks out and runs"
+
 [[ "$(guest "$FINAL_PASSWORD" "systemctl show -p RuntimeWatchdogUSec --value")" == "30s" ]] \
   || die "the runtime watchdog is not active"
 guest "$FINAL_PASSWORD" "test -e /dev/watchdog0" || die "no watchdog device"

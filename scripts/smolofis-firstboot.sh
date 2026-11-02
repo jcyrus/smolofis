@@ -41,6 +41,11 @@ container:
 EOF
 fi
 
+# Runners registered before the instance address changed keep it in .runner.
+if [[ -f "${STATE_ROOT}/gitea-runner/.runner" ]]; then
+    sed -i 's#http://gitea:3000#http://smolofis.local:3000#' "${STATE_ROOT}/gitea-runner/.runner"
+fi
+
 # Coolify uses UID 9999 (www-data) and GID 0 (root).
 install -d -m 0750 "${STATE_ROOT}/coolify"
 install -d -m 0700 "${STATE_ROOT}/coolify/db"
