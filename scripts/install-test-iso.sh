@@ -559,6 +559,10 @@ suspend_state="$(guest "$FINAL_PASSWORD" "systemctl is-enabled suspend.target" |
 [[ "$suspend_state" == "masked" ]] || die "suspend.target is ${suspend_state:-unknown}, not masked"
 log "PASS  the appliance cannot suspend"
 
+guest "$FINAL_PASSWORD" "systemctl is-active getty@tty1.service" >/dev/null \
+  || die "the installed system has no console login"
+log "PASS  the installed system has a console login"
+
 guest "$FINAL_PASSWORD" "sudo smolofis-admin timezone Asia/Ho_Chi_Minh" >/dev/null || die "could not set the time zone"
 if guest "$FINAL_PASSWORD" "sudo smolofis-admin timezone Nowhere/Invalid" >/dev/null 2>&1; then
   die "an unknown time zone was accepted"

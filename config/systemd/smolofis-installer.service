@@ -4,13 +4,14 @@
 [Unit]
 Description=SmolOfis guided installer
 ConditionPathIsMountPoint=!/var/lib/smolofis
-After=systemd-user-sessions.service
-Conflicts=getty@tty1.service
-Before=getty@tty1.service
+After=systemd-user-sessions.service getty@tty1.service
 
 [Service]
 Type=idle
 Environment=TERM=linux
+# Not Conflicts=: systemd applies that before checking the condition above, which
+# would remove the console login from installed systems.
+ExecStartPre=-/usr/bin/systemctl stop getty@tty1.service
 ExecStart=/usr/local/bin/smolofis-install --wizard
 ExecStopPost=-/usr/bin/systemctl start --no-block getty@tty1.service
 StandardInput=tty
