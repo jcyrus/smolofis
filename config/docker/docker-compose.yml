@@ -55,14 +55,18 @@ services:
     depends_on:
       gitea:
         condition: service_healthy
+    extra_hosts:
+      - smolofis.local:host-gateway
     env_file:
       - /etc/smolofis/runner.env
     environment:
-      GITEA_INSTANCE_URL: "http://gitea:3000"
+      # actions/checkout clones from this address inside job containers, which
+      # are not on the Compose network, so it cannot be the service name.
+      GITEA_INSTANCE_URL: "http://smolofis.local:3000"
       GITEA_RUNNER_NAME: smolofis-runner
       GITEA_RUNNER_LABELS: "ubuntu-latest:docker://node:22-bookworm,ubuntu-24.04:docker://node:22-bookworm"
       # Written by smolofis-firstboot; adds the smolofis.local host entry to job
-      # containers so actions/checkout can reach Gitea's ROOT_URL.
+      # containers so actions/checkout can reach Gitea.
       CONFIG_FILE: /data/config.yaml
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
