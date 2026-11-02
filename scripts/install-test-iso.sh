@@ -310,12 +310,14 @@ shutdown_vm "$LIVE_PASSWORD"
 # ---------------------------------------------------------------------------
 boot_vm "installed disk (first boot)"
 
-if [[ -n "$BASE_ISO" ]]; then
-  change_expired_password "$DEFAULT_PASSWORD" "$FINAL_PASSWORD"
-else
-  wait_login "$LIVE_PASSWORD" || die "the password chosen on the USB image was not carried over"
+# A --base-iso build may predate the password carrying over.
+if wait_login "$LIVE_PASSWORD"; then
   log "PASS  password chosen on the USB image carried over"
   guest "$LIVE_PASSWORD" "echo smolofis:${FINAL_PASSWORD} | sudo chpasswd" || die "could not change the password"
+elif [[ -n "$BASE_ISO" ]]; then
+  change_expired_password "$DEFAULT_PASSWORD" "$FINAL_PASSWORD"
+else
+  die "the password chosen on the USB image was not carried over"
 fi
 installed_key="$(host_key_fingerprint)"
 [[ -n "$installed_key" ]] || die "no SSH host key on the installed disk"
