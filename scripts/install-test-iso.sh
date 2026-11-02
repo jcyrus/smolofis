@@ -643,9 +643,12 @@ slot="$(booted_slot)"
 [[ "$slot" == "system-b" ]] || die "rollback booted ${slot}, not system-b"
 log "PASS  a failed update rolled back to the previous slot"
 
+# Logged-in but still booting, so wait for the stack before judging its logs.
+wait_ready "after the rollback"
 bundle="$(guest "$FINAL_PASSWORD" "sudo smolofis-support" | tail -n 1)"
-guest "$FINAL_PASSWORD" "sudo sh -c '. /etc/smolofis/admin.env; . /etc/smolofis/runner.env; mkdir /tmp/support && tar -xzf ${bundle} -C /tmp/support && test -s /tmp/support/journal.txt && ! grep -rqF -e \"\$GITEA_ADMIN_PASSWORD\" -e \"\$COOLIFY_ADMIN_PASSWORD\" -e \"\$GITEA_RUNNER_REGISTRATION_TOKEN\" /tmp/support'" \
-  || die "support bundle is missing data or contains a secret"
+[[ "$bundle" == /var/lib/smolofis/support-*.tar.gz ]] || die "smolofis-support did not report a bundle: ${bundle:-<nothing>}"
+leaks="$(guest "$FINAL_PASSWORD" "sudo bash -c '. /etc/smolofis/admin.env; . /etc/smolofis/runner.env; mkdir -p /tmp/support; tar -xzf ${bundle} -C /tmp/support; test -s /tmp/support/journal.txt || echo missing-journal; for name in GITEA_ADMIN_PASSWORD COOLIFY_ADMIN_PASSWORD GITEA_RUNNER_REGISTRATION_TOKEN; do value=\\\${!name}; [[ -n \\\$value ]] || echo empty-\\\$name; grep -rlF -- \\\"\\\$value\\\" /tmp/support | sed s,/tmp/support/,\\\$name-in-, ; done'")"
+[[ -z "$leaks" ]] || die "support bundle failed: ${leaks//$'\n'/, }"
 log "PASS  support bundle works and contains no secrets"
 
 log "install test PASSED (${FIRMWARE})"
