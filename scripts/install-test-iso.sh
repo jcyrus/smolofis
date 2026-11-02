@@ -310,7 +310,13 @@ shutdown_vm "$LIVE_PASSWORD"
 # ---------------------------------------------------------------------------
 boot_vm "installed disk (first boot)"
 
-change_expired_password "$DEFAULT_PASSWORD" "$FINAL_PASSWORD"
+if [[ -n "$BASE_ISO" ]]; then
+  change_expired_password "$DEFAULT_PASSWORD" "$FINAL_PASSWORD"
+else
+  wait_login "$LIVE_PASSWORD" || die "the password chosen on the USB image was not carried over"
+  log "PASS  password chosen on the USB image carried over"
+  guest "$LIVE_PASSWORD" "echo smolofis:${FINAL_PASSWORD} | sudo chpasswd" || die "could not change the password"
+fi
 installed_key="$(host_key_fingerprint)"
 [[ -n "$installed_key" ]] || die "no SSH host key on the installed disk"
 [[ "$installed_key" != "$live_key" ]] || die "SSH host key was shared between boots of different identity"
@@ -449,6 +455,10 @@ change_expired_password "$DEFAULT_PASSWORD" "$LIVE_PASSWORD"
 guest "$LIVE_PASSWORD" "grep -q '<port>8090</port>' /etc/avahi/services/smolofis-panel.service" \
   || die "the USB image does not advertise the panel on port 8090"
 log "PASS  USB image advertises port 8090 over mDNS"
+
+guest "$LIVE_PASSWORD" "systemctl is-active smolofis-installer" >/dev/null \
+  || die "the guided installer did not start on the console"
+log "PASS  guided installer runs on the USB image"
 guest "$LIVE_PASSWORD" "sudo smolofis-install --upgrade --disk /dev/vda --yes" \
   || die "smolofis-install --upgrade failed"
 log "PASS  upgrade completed from the USB image"
@@ -528,6 +538,15 @@ log "PASS  a Gitea Actions job checks out and runs"
 guest "$FINAL_PASSWORD" "test -e /dev/watchdog0" || die "no watchdog device"
 log "PASS  hang watchdog is active"
 
+# is-enabled exits non-zero for a masked unit, so read its output instead.
+suspend_state="$(guest "$FINAL_PASSWORD" "systemctl is-enabled suspend.target" || true)"
+[[ "$suspend_state" == "masked" ]] || die "suspend.target is ${suspend_state:-unknown}, not masked"
+log "PASS  the appliance cannot suspend"
+
+guest "$FINAL_PASSWORD" "docker exec smolofis-coolify php artisan tinker --execute='echo App\\Models\\Server::find(0)->settings->wildcard_domain;'" | grep -q '\.sslip\.io' \
+  || die "Coolify's wildcard domain was not set from the LAN IP"
+log "PASS  Coolify builds app domains from the LAN IP"
+
 guest "$FINAL_PASSWORD" "sudo smolofis-backup push-key | install -D -m 0600 /dev/stdin ~/.ssh/authorized_keys" \
   || die "could not authorize the backup key"
 guest "$FINAL_PASSWORD" "echo BACKUP_REMOTE=smolofis@127.0.0.1:/home/smolofis/backup-copy | sudo tee /etc/smolofis/backup.env >/dev/null; mkdir -p /home/smolofis/backup-copy; sudo smolofis-backup push" >/dev/null \
@@ -544,6 +563,21 @@ fi
 guest "$FINAL_PASSWORD" "docker image inspect traefik/whoami:v1.10" >/dev/null 2>&1 \
   || die "pruning removed an image SmolOfis did not ship"
 log "PASS  old shipped images are pruned, and other images are kept"
+
+guest "$FINAL_PASSWORD" "docker run -d --name app-data-test --label coolify.managed=true --label com.docker.compose.project=app-data-test -v app-data-test:/data busybox:musl sh -c 'echo keep > /data/value; exec sleep 86400'" >/dev/null \
+  || die "could not start the app data test container"
+guest "$FINAL_PASSWORD" "sudo smolofis-backup run" >/dev/null || die "backup with app data failed"
+wait_gitea
+guest "$FINAL_PASSWORD" "docker exec app-data-test true" || die "the app was not restarted after the backup"
+guest "$FINAL_PASSWORD" "docker exec app-data-test sh -c 'echo changed > /data/value'" || die "could not change app data"
+app_backup="$(guest "$FINAL_PASSWORD" "sudo smolofis-backup list" | tail -n 1)"
+guest "$FINAL_PASSWORD" "sudo smolofis-backup restore ${app_backup} --yes" >/dev/null || die "restore with app data failed"
+wait_gitea
+guest "$FINAL_PASSWORD" "docker exec app-data-test cat /data/value" | grep -qx keep \
+  || die "restore did not bring app data back"
+guest "$FINAL_PASSWORD" "docker rm -f app-data-test && docker volume rm app-data-test" >/dev/null
+wait_ready "after restoring app data"
+log "PASS  backup and restore cover deployed apps' data"
 
 BUNDLE="${WORK}/bundle"
 mkdir -p "$BUNDLE"

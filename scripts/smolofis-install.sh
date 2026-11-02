@@ -21,13 +21,20 @@ readonly C_OFF=$'\033[0m'
 
 log()  { printf '%s[smolofis-install]%s %s\n' "${C_INFO}" "${C_OFF}" "$*"; }
 warn() { printf '%s[smolofis-install] WARNING:%s %s\n' "${C_WARN}" "${C_OFF}" "$*" >&2; }
-die()  { printf '%s[smolofis-install] ERROR:%s %s\n' "${C_ERR}" "${C_OFF}" "$*" >&2; exit 1; }
+die()  {
+    printf '%s[smolofis-install] ERROR:%s %s\n' "${C_ERR}" "${C_OFF}" "$*" >&2
+    if [[ ${WIZARD:-0} -eq 1 ]]; then
+        read -rp "Press Enter for a login prompt. " _
+    fi
+    exit 1
+}
 
 [[ ${EUID} -eq 0 ]] || die "must be run as root (use sudo)"
 
 TARGET_DISK=""
 ASSUME_YES=0
 UPGRADE=0
+WIZARD=0
 SOURCE_DIR=""
 MOUNT_DIR="$(mktemp -d -t smolofis-install-XXXXXX)"
 
@@ -51,12 +58,14 @@ while [[ $# -gt 0 ]]; do
         --disk) TARGET_DISK="$2"; shift 2 ;;
         --source) SOURCE_DIR="$2"; shift 2 ;;
         --upgrade) UPGRADE=1; shift ;;
+        --wizard) WIZARD=1; shift ;;
         -y|--yes) ASSUME_YES=1; shift ;;
         -h|--help)
             echo "Usage: sudo smolofis-install [OPTIONS]"
             echo "  --disk PATH    Target drive to wipe and install to (e.g. /dev/nvme0n1, /dev/sda)"
             echo "  --source PATH  Custom path to directory containing live {vmlinuz, initrd.img, filesystem.squashfs}"
             echo "  --upgrade      Replace the system on an installed disk and keep all data"
+            echo "  --wizard       Guided install on the console"
             echo "  -y, --yes      Skip confirmation prompts"
             exit 0
             ;;
@@ -105,6 +114,60 @@ if [[ -n "${BOOT_MEDIUM_DEV}" ]]; then
     # A hybrid ISO can be mounted from the whole disk, which has no parent.
     BOOT_PARENT="$(lsblk -d -n -o PKNAME "${BOOT_MEDIUM_DEV}" 2>/dev/null || true)"
     BOOT_DISK="/dev/${BOOT_PARENT:-$(basename "${BOOT_MEDIUM_DEV}")}"
+fi
+
+# ---------------------------------------------------------------------------
+# Guided install
+# ---------------------------------------------------------------------------
+# Whiptail's result goes to stderr, so swap the streams to capture it.
+wizard_ask() { whiptail --title "SmolOfis" "$@" 3>&1 1>&2 2>&3; }
+
+wizard_password() {
+    local changed first second
+    IFS=: read -r _ _ changed _ < <(getent shadow smolofis)
+    [[ "${changed}" == "0" ]] || return 0
+    while true; do
+        first="$(wizard_ask --passwordbox "Choose a password for the smolofis account." 9 60)" || exit 0
+        second="$(wizard_ask --passwordbox "Type the password again." 9 60)" || exit 0
+        if [[ -n "${first}" && "${first}" == "${second}" ]]; then
+            break
+        fi
+        whiptail --title "SmolOfis" --msgbox "The passwords were empty or did not match." 8 60
+    done
+    printf 'smolofis:%s\n' "${first}" | chpasswd
+}
+
+run_wizard() {
+    whiptail --title "SmolOfis" --yesno "Install SmolOfis to an internal disk?\n\nChoose No for a login prompt." 10 60 || exit 0
+
+    local name size type model items=()
+    while read -r name size type model; do
+        [[ "${type}" == "disk" && "/dev/${name}" != "${BOOT_DISK}" ]] || continue
+        items+=("/dev/${name}" "${size} ${model:-disk}")
+    done < <(lsblk -d -n -o NAME,SIZE,TYPE,MODEL)
+
+    if [[ ${#items[@]} -eq 0 ]]; then
+        whiptail --title "SmolOfis" --msgbox "No internal disk was found." 8 60
+        exit 0
+    fi
+
+    TARGET_DISK="$(wizard_ask --menu "Choose the disk to install to." 15 72 6 "${items[@]}")" || exit 0
+    whiptail --title "SmolOfis" --defaultno --yesno \
+        "ALL DATA ON ${TARGET_DISK} WILL BE ERASED.\n\n$(lsblk -d -n -o SIZE,MODEL "${TARGET_DISK}")\n\nInstall SmolOfis on this disk?" 12 72 || exit 0
+
+    wizard_password
+    ASSUME_YES=1
+}
+
+wizard_finish() {
+    local ip
+    ip="$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')"
+    whiptail --title "SmolOfis" --msgbox "SmolOfis is installed.\n\nRemove the USB drive, then press Enter to restart.\n\nThe panel will be at http://${ip:-this machine}\nor http://smolofis.local from the same network.\n\nFor the Gitea and Coolify logins, sign in as smolofis and run:\nsudo smolofis-admin show" 16 72
+    reboot
+}
+
+if [[ ${WIZARD} -eq 1 ]]; then
+    run_wizard
 fi
 
 # ---------------------------------------------------------------------------
@@ -296,7 +359,8 @@ log "formatting System Partition (${PART_SYS})..."
 mkfs.ext4 -F -q -L "SMOLOFIS_SYS" "${PART_SYS}"
 
 log "formatting Persistent Data Partition (${PART_DATA})..."
-mkfs.ext4 -F -q -L "persistence" "${PART_DATA}"
+# ext4 reserves 5% for root by default, which is far too much on a large disk.
+mkfs.ext4 -F -q -m 1 -L "persistence" "${PART_DATA}"
 
 # ---------------------------------------------------------------------------
 # Copying System Payloads
@@ -315,6 +379,13 @@ mount "${PART_DATA}" "${DATA_MNT}"
 install -m 0644 /usr/share/smolofis/persistence.conf "${DATA_MNT}/persistence.conf"
 mkdir -p "${DATA_MNT}/var/lib/smolofis/gitea" "${DATA_MNT}/var/lib/smolofis/coolify" "${DATA_MNT}/var/lib/tailscale" "${DATA_MNT}/var/lib/docker" "${DATA_MNT}/var/lib/containerd"
 chmod 0700 "${DATA_MNT}/var/lib/tailscale"
+
+# Keep the password chosen on the USB image, so it is only set once.
+IFS=: read -r _ OPERATOR_HASH OPERATOR_CHANGED _ < <(getent shadow smolofis)
+if [[ "${OPERATOR_CHANGED}" != "0" && -n "${OPERATOR_HASH}" ]]; then
+    install -d -m 0700 "${DATA_MNT}/etc/smolofis/identity"
+    (umask 077 && printf '%s\n' "${OPERATOR_HASH}" > "${DATA_MNT}/etc/smolofis/identity/operator-password.hash")
+fi
 chown -R 1000:1000 "${DATA_MNT}/var/lib/smolofis/gitea" 2>/dev/null || true
 sync
 
@@ -351,7 +422,9 @@ log "installation completed successfully!"
 printf '\n%sSmolOfis has been successfully installed to %s.%s\n' "${C_INFO}${C_BOLD}" "${TARGET_DISK}" "${C_OFF}"
 echo "You can now safely remove the USB installation drive and reboot the appliance."
 
-if [[ ${ASSUME_YES} -eq 0 ]]; then
+if [[ ${WIZARD} -eq 1 ]]; then
+    wizard_finish
+elif [[ ${ASSUME_YES} -eq 0 ]]; then
     read -rp "Reboot now? (y/N): " REBOOT
     if [[ "${REBOOT}" =~ ^[Yy]$ ]]; then
         reboot

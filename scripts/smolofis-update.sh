@@ -49,8 +49,8 @@ verify_signature() {
 cmd_check() {
     local channel="stable" remote
     [[ "${1:-}" != "--channel" ]] || channel="$2"
-    remote="$(curl -fsSL "$(manifest_url "${channel}")" | sed -n 's/^VERSION=//p')"
-    [[ -n "${remote}" ]] || die "could not read the ${channel} release"
+    remote="$(curl -fsSL "$(manifest_url "${channel}")" 2>/dev/null | sed -n 's/^VERSION=//p' || true)"
+    [[ -n "${remote}" ]] || die "no ${channel} release is available; try --channel nightly, or check the network"
     printf 'current: %s\nlatest:  %s (%s)\n' "$(cat /etc/smolofis-release)" "${remote}" "${channel}"
     is_newer "${remote}" "$(cat /etc/smolofis-release)" && echo "update available" || echo "up to date"
 }

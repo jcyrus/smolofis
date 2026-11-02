@@ -2,8 +2,8 @@
 #
 # smolofis-backup — back up and restore Gitea, Coolify and device secrets.
 #
-# Gitea is stopped briefly so that its SQLite database and repositories are
-# copied consistently, which keeps a restore to a single tar extract. Backups
+# Gitea and deployed apps are stopped briefly so that their databases are copied
+# consistently, which keeps a restore to a single tar extract. Backups
 # include /etc/smolofis, because Coolify cannot decrypt its database without
 # APP_KEY. They sit on the data partition, so to survive a disk failure set
 # BACKUP_REMOTE=user@host:/path in /etc/smolofis/backup.env. Each backup is then
@@ -21,6 +21,7 @@ set -euo pipefail
 readonly STATE_ROOT="/var/lib/smolofis"
 readonly BACKUP_ROOT="${STATE_ROOT}/backups"
 readonly KEEP=7
+readonly VOLUME_ROOT="/var/lib/docker/volumes"
 readonly REMOTE_ENV="/etc/smolofis/backup.env"
 readonly PUSH_KEY="/etc/smolofis/identity/backup_ed25519"
 
@@ -29,12 +30,67 @@ die() { printf '[smolofis-backup] ERROR: %s\n' "$*" >&2; exit 1; }
 
 [[ ${EUID} -eq 0 ]] || die "must run as root (use sudo)"
 
+# Running containers deployed through Coolify, not its proxy or sentinel.
+app_containers() {
+    local container project
+    docker ps -q --filter label=coolify.managed=true | while read -r container; do
+        project="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "${container}")"
+        if [[ -n "${project}" && "${project}" != "coolify-proxy" ]]; then
+            echo "${container}"
+        fi
+    done
+}
+
+start_apps() {
+    if [[ -n "${STOPPED_APPS:-}" ]]; then
+        # shellcheck disable=SC2086
+        docker start ${STOPPED_APPS} >/dev/null || log "could not restart every app"
+    fi
+    STOPPED_APPS=""
+}
+
+archive_app_volumes() {
+    local output="$1" volumes
+    STOPPED_APPS="$(app_containers | tr '\n' ' ')"
+    [[ -n "${STOPPED_APPS// /}" ]] || return 0
+    # shellcheck disable=SC2086
+    volumes="$(docker inspect -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\n"}}{{end}}{{end}}' ${STOPPED_APPS} | sort -u | grep . || true)"
+    if [[ -z "${volumes}" ]]; then
+        STOPPED_APPS=""
+        return 0
+    fi
+    log "archiving deployed apps' data (stopped briefly)"
+    # shellcheck disable=SC2086
+    docker stop ${STOPPED_APPS} >/dev/null
+    # shellcheck disable=SC2086
+    tar -czf "${output}" -C "${VOLUME_ROOT}" ${volumes}
+    start_apps
+}
+
+restore_app_volumes() {
+    local archive="$1" volume
+    [[ -f "${archive}" ]] || return 0
+    log "restoring deployed apps' data"
+    STOPPED_APPS="$(app_containers | tr '\n' ' ')"
+    if [[ -n "${STOPPED_APPS// /}" ]]; then
+        # shellcheck disable=SC2086
+        docker stop ${STOPPED_APPS} >/dev/null
+    fi
+    for volume in $(tar -tzf "${archive}" | cut -d/ -f1 | sort -u); do
+        docker volume create "${volume}" >/dev/null
+        rm -rf "${VOLUME_ROOT:?}/${volume}/_data"
+    done
+    tar -xzf "${archive}" -C "${VOLUME_ROOT}"
+    start_apps
+}
+
 run_backup() {
     local name partial
     name="$(date -u +%Y%m%dT%H%M%SZ)"
     partial="${BACKUP_ROOT}/.partial-${name}"
     install -d -m 0700 "${BACKUP_ROOT}" "${partial}"
-    trap 'docker start smolofis-gitea >/dev/null 2>&1 || true; rm -rf "${partial}"' EXIT
+    STOPPED_APPS=""
+    trap 'start_apps; docker start smolofis-gitea >/dev/null 2>&1 || true; rm -rf "${partial}"' EXIT
 
     log "dumping the Coolify database"
     docker exec smolofis-coolify-db pg_dump -U coolify -Fc coolify > "${partial}/coolify-db.dump"
@@ -43,6 +99,8 @@ run_backup() {
     tar -czf "${partial}/coolify-files.tar.gz" --exclude=coolify/db --exclude=coolify/redis \
         --exclude=coolify/backups -C "${STATE_ROOT}" coolify
     tar -czf "${partial}/config.tar.gz" -C / etc/smolofis
+
+    archive_app_volumes "${partial}/app-volumes.tar.gz"
 
     log "archiving Gitea (stopped briefly)"
     docker stop smolofis-gitea >/dev/null
@@ -105,6 +163,8 @@ run_restore() {
     db_password="$(sed -n 's/^POSTGRES_PASSWORD=//p' /etc/smolofis/secrets.env)"
     docker exec smolofis-coolify-db psql -q -U coolify -d coolify \
         -c "ALTER ROLE coolify PASSWORD '${db_password}'"
+
+    restore_app_volumes "${source}/app-volumes.tar.gz"
 
     log "restarting the stack"
     systemctl restart smolofis-infrastructure.service

@@ -1,0 +1,24 @@
+# Opens the guided installer on the console when booted from the USB image, so
+# installing needs no login. Exiting it leaves a normal login prompt.
+
+[Unit]
+Description=SmolOfis guided installer
+ConditionPathIsMountPoint=!/var/lib/smolofis
+After=systemd-user-sessions.service
+Conflicts=getty@tty1.service
+Before=getty@tty1.service
+
+[Service]
+Type=idle
+Environment=TERM=linux
+ExecStart=/usr/local/bin/smolofis-install --wizard
+ExecStopPost=-/usr/bin/systemctl start --no-block getty@tty1.service
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=multi-user.target

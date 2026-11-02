@@ -56,7 +56,8 @@ SmolOfis boots headless but provides full local console and SSH access:
 - **CPU:** x86-64. A recent mini-PC such as an Intel N100 is the target.
 - **Memory:** 4 GiB minimum, 8 GiB recommended. The full stack is tested with 6 GiB.
 - **Storage:** 32 GiB minimum on an internal SSD. The system partition takes about 8.5 GiB, and the rest holds your data. 128 GiB or more is sensible for real use.
-- **Network:** wired Ethernet with DHCP. Wi-Fi is not configured.
+- **Network:** wired Ethernet with DHCP. Wi-Fi is not configured. `smolofis.local` only works from the same network, because mDNS does not cross routers. From another subnet, use the IP address shown on the console and reserve it in your router.
+- **Power:** set **Restore on AC Power Loss** to **Power On** in the BIOS, so the appliance returns after an outage. The power button is ignored on purpose, so use `sudo poweroff`.
 - **Firmware:** UEFI or legacy BIOS. **Turn Secure Boot off**, because the bootloader is not signed for it.
 
 ---
@@ -65,14 +66,10 @@ SmolOfis boots headless but provides full local console and SSH access:
 
 SmolOfis boots as a live image from USB for trying the panel and running the installer. The Gitea and Coolify stack needs a data partition, so it only starts after installing; on the USB image the panel is at `http://smolofis.local:8090` and shows `LIVE MODE`. To permanently install the appliance onto your hardware's internal NVMe or SATA SSD:
 
-1. Boot your machine from the flashed USB stick.
-2. Log in locally or via SSH (`ssh smolofis@smolofis.local`).
-3. Run the interactive disk installer:
-   ```bash
-   sudo smolofis-install
-   ```
-4. Select your target drive (e.g. `/dev/nvme0n1`). The installer will automatically format the disk with UEFI and legacy BIOS bootloaders, the immutable system partition, and a persistent data partition for your Gitea repos and Docker volumes.
-5. Reboot and unplug the USB drive.
+1. Boot your machine from the flashed USB stick and pick **SmolOfis Appliance**.
+2. With a screen attached, the guided installer opens by itself. Choose the disk, confirm, and choose a password. Without a screen, sign in over SSH (`ssh smolofis@smolofis.local`) and run `sudo smolofis-install`.
+3. The installer will automatically format the disk with UEFI and legacy BIOS bootloaders, the immutable system partition, and a persistent data partition for your Gitea repos and Docker volumes.
+4. Reboot and unplug the USB drive. The final screen shows the panel's address.
 
 For non-interactive or automated provisioning:
 ```bash
@@ -115,7 +112,7 @@ Stack changes ship with the image, so `/etc/smolofis/docker-compose.yml` is repl
 
 ## 💼 Backups
 
-A nightly job archives Gitea, Coolify and the device's secrets to `/var/lib/smolofis/backups`, keeping the last 7. Gitea stops for a short time while it runs.
+A nightly job archives Gitea, Coolify, deployed apps' Docker volumes and the device's secrets to `/var/lib/smolofis/backups`, keeping the last 7. Gitea and your deployed apps stop for a short time while it runs, around 03:00. Only apps running at that moment are included.
 
 ```bash
 sudo smolofis-backup run                # back up now
