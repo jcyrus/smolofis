@@ -3,8 +3,8 @@
 # smolofis-identity — per-device SSH host keys and operator password.
 #
 # The root filesystem is a RAM overlay on a read-only squashfs, so anything
-# written to /etc/ssh or /etc/shadow is gone after a reboot. This script keeps
-# the device's identity under /etc/smolofis, which is on persistent storage.
+# written to /etc/ssh, /etc/shadow or /etc/localtime is gone after a reboot. This
+# script keeps the device's identity under /etc/smolofis, on persistent storage.
 #
 # Usage:
 #   smolofis-identity restore   # at boot, before sshd and any login prompt
@@ -16,6 +16,7 @@ readonly IDENTITY_ROOT="/etc/smolofis/identity"
 readonly HOST_KEY_DIR="${IDENTITY_ROOT}/ssh"
 readonly HASH_FILE="${IDENTITY_ROOT}/operator-password.hash"
 readonly OPERATOR="smolofis"
+readonly TIMEZONE_FILE="/etc/smolofis/timezone"
 
 log() { printf '[smolofis-identity] %s\n' "$*"; }
 
@@ -37,6 +38,18 @@ restore_host_keys() {
         install -o root -g root -m 0600 "${key}" /etc/ssh/
         install -o root -g root -m 0644 "${key}.pub" /etc/ssh/
     done
+}
+
+restore_timezone() {
+    [[ -s "${TIMEZONE_FILE}" ]] || return 0
+    local zone
+    zone="$(<"${TIMEZONE_FILE}")"
+    if [[ -f "/usr/share/zoneinfo/${zone}" ]]; then
+        ln -sf "/usr/share/zoneinfo/${zone}" /etc/localtime
+        log "time zone is ${zone}"
+    else
+        log "ignoring unknown time zone ${zone}"
+    fi
 }
 
 restore_operator_password() {
@@ -65,6 +78,7 @@ case "${1:-}" in
     restore)
         restore_host_keys
         restore_operator_password
+        restore_timezone
         ;;
     save)
         save_operator_password

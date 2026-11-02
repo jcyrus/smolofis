@@ -35,6 +35,7 @@ TARGET_DISK=""
 ASSUME_YES=0
 UPGRADE=0
 WIZARD=0
+TIMEZONE=""
 SOURCE_DIR=""
 MOUNT_DIR="$(mktemp -d -t smolofis-install-XXXXXX)"
 
@@ -59,6 +60,7 @@ while [[ $# -gt 0 ]]; do
         --source) SOURCE_DIR="$2"; shift 2 ;;
         --upgrade) UPGRADE=1; shift ;;
         --wizard) WIZARD=1; shift ;;
+        --timezone) TIMEZONE="$2"; shift 2 ;;
         -y|--yes) ASSUME_YES=1; shift ;;
         -h|--help)
             echo "Usage: sudo smolofis-install [OPTIONS]"
@@ -66,6 +68,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --source PATH  Custom path to directory containing live {vmlinuz, initrd.img, filesystem.squashfs}"
             echo "  --upgrade      Replace the system on an installed disk and keep all data"
             echo "  --wizard       Guided install on the console"
+            echo "  --timezone TZ  Time zone for scheduled jobs (e.g. Asia/Ho_Chi_Minh)"
             echo "  -y, --yes      Skip confirmation prompts"
             exit 0
             ;;
@@ -137,6 +140,18 @@ wizard_password() {
     printf 'smolofis:%s\n' "${first}" | chpasswd
 }
 
+wizard_timezone() {
+    local zone
+    while true; do
+        zone="$(wizard_ask --inputbox "Enter this office's time zone, such as Asia/Ho_Chi_Minh.\nNightly backups run around 03:00 in this zone." 10 66 "UTC")" || exit 0
+        if [[ -n "${zone}" && -f "/usr/share/zoneinfo/${zone}" ]]; then
+            TIMEZONE="${zone}"
+            return 0
+        fi
+        whiptail --title "SmolOfis" --msgbox "'${zone}' is not a known time zone." 8 60
+    done
+}
+
 run_wizard() {
     whiptail --title "SmolOfis" --yesno "Install SmolOfis to an internal disk?\n\nChoose No for a login prompt." 10 60 || exit 0
 
@@ -156,6 +171,7 @@ run_wizard() {
         "ALL DATA ON ${TARGET_DISK} WILL BE ERASED.\n\n$(lsblk -d -n -o SIZE,MODEL "${TARGET_DISK}")\n\nInstall SmolOfis on this disk?" 12 72 || exit 0
 
     wizard_password
+    wizard_timezone
     ASSUME_YES=1
 }
 
@@ -379,6 +395,12 @@ mount "${PART_DATA}" "${DATA_MNT}"
 install -m 0644 /usr/share/smolofis/persistence.conf "${DATA_MNT}/persistence.conf"
 mkdir -p "${DATA_MNT}/var/lib/smolofis/gitea" "${DATA_MNT}/var/lib/smolofis/coolify" "${DATA_MNT}/var/lib/tailscale" "${DATA_MNT}/var/lib/docker" "${DATA_MNT}/var/lib/containerd"
 chmod 0700 "${DATA_MNT}/var/lib/tailscale"
+
+if [[ -n "${TIMEZONE}" ]]; then
+    [[ -f "/usr/share/zoneinfo/${TIMEZONE}" ]] || die "unknown time zone: ${TIMEZONE}"
+    install -d -m 0755 "${DATA_MNT}/etc/smolofis"
+    printf '%s\n' "${TIMEZONE}" > "${DATA_MNT}/etc/smolofis/timezone"
+fi
 
 # Keep the password chosen on the USB image, so it is only set once.
 IFS=: read -r _ OPERATOR_HASH OPERATOR_CHANGED _ < <(getent shadow smolofis)
