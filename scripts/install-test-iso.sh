@@ -157,8 +157,12 @@ boot_vm() {
 }
 
 host_key_fingerprint() {
-  ssh-keyscan -T 5 -t ed25519 -p "$SSH_PORT" 127.0.0.1 2>/dev/null \
-    | ssh-keygen -lf - | awk '{print $2}'
+  local deadline=$(( SECONDS + 90 )) key=""
+  while [[ -z "$key" ]] && (( SECONDS < deadline )); do
+    key="$(ssh-keyscan -T 5 -t ed25519 -p "$SSH_PORT" 127.0.0.1 2>/dev/null || true)"
+    [[ -n "$key" ]] || sleep 3
+  done
+  ssh-keygen -lf - <<<"$key" | awk '{print $2}'
 }
 
 # expired_password_dialog <old> <new>
@@ -179,8 +183,18 @@ EOF
 }
 
 # guest <password> <command>
+# OpenSSH penalises connections that never log in, which is what ssh-keyscan does,
+# and drops that source for 15 seconds or more. ssh exits 255 when that happens.
 guest() {
-  SSHPASS="$1" sshpass -e ssh "${SSH_OPTS[@]}" smolofis@127.0.0.1 "$2"
+  local rc deadline=$(( SECONDS + 90 ))
+  while true; do
+    rc=0
+    SSHPASS="$1" sshpass -e ssh "${SSH_OPTS[@]}" smolofis@127.0.0.1 "$2" || rc=$?
+    if [[ $rc -ne 255 ]] || (( SECONDS >= deadline )); then
+      return "$rc"
+    fi
+    sleep 3
+  done
 }
 
 # sshd opens before logins are allowed, so a login right after boot can be
