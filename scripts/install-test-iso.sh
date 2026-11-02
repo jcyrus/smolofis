@@ -645,9 +645,29 @@ log "PASS  a failed update rolled back to the previous slot"
 
 # Logged-in but still booting, so wait for the stack before judging its logs.
 wait_ready "after the rollback"
-bundle="$(guest "$FINAL_PASSWORD" "sudo smolofis-support" | tail -n 1)"
-[[ "$bundle" == /var/lib/smolofis/support-*.tar.gz ]] || die "smolofis-support did not report a bundle: ${bundle:-<nothing>}"
-leaks="$(guest "$FINAL_PASSWORD" "sudo bash -c '. /etc/smolofis/admin.env; . /etc/smolofis/runner.env; mkdir -p /tmp/support; tar -xzf ${bundle} -C /tmp/support; test -s /tmp/support/journal.txt || echo missing-journal; for name in GITEA_ADMIN_PASSWORD COOLIFY_ADMIN_PASSWORD GITEA_RUNNER_REGISTRATION_TOKEN; do value=\\\${!name}; [[ -n \\\$value ]] || echo empty-\\\$name; grep -rlF -- \\\"\\\$value\\\" /tmp/support | sed s,/tmp/support/,\\\$name-in-, ; done'")"
+support_rc=0
+support_output="$(guest "$FINAL_PASSWORD" "sudo smolofis-support" 2>&1)" || support_rc=$?
+bundle="$(tail -n 1 <<<"$support_output")"
+if [[ $support_rc -ne 0 || "$bundle" != /var/lib/smolofis/support-*.tar.gz ]]; then
+  echo "smolofis-support exited ${support_rc}: ${support_output}"
+  wait_login "$FINAL_PASSWORD" || true
+  guest "$FINAL_PASSWORD" "uptime -p; sudo journalctl --list-boots --no-pager | tail -n 3; sudo journalctl -b --no-pager -n 30 -u ssh" 2>&1 || true
+  diagnose_guest
+  die "smolofis-support did not produce a bundle"
+fi
+
+leaks="$(guest "$FINAL_PASSWORD" "sudo bash -s ${bundle}" <<'EOF'
+. /etc/smolofis/admin.env
+. /etc/smolofis/runner.env
+mkdir -p /tmp/support
+tar -xzf "$1" -C /tmp/support
+[[ -s /tmp/support/journal.txt ]] || echo "journal.txt is missing"
+for name in GITEA_ADMIN_PASSWORD COOLIFY_ADMIN_PASSWORD GITEA_RUNNER_REGISTRATION_TOKEN; do
+  [[ -n "${!name}" ]] || echo "${name} is empty"
+  grep -rlF -- "${!name}" /tmp/support | sed "s,/tmp/support/,${name} found in ," || true
+done
+EOF
+)"
 [[ -z "$leaks" ]] || die "support bundle failed: ${leaks//$'\n'/, }"
 log "PASS  support bundle works and contains no secrets"
 
