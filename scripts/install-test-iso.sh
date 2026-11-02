@@ -157,8 +157,12 @@ boot_vm() {
 }
 
 host_key_fingerprint() {
-  ssh-keyscan -T 5 -t ed25519 -p "$SSH_PORT" 127.0.0.1 2>/dev/null \
-    | ssh-keygen -lf - | awk '{print $2}'
+  local deadline=$(( SECONDS + 90 )) key=""
+  while [[ -z "$key" ]] && (( SECONDS < deadline )); do
+    key="$(ssh-keyscan -T 5 -t ed25519 -p "$SSH_PORT" 127.0.0.1 2>/dev/null || true)"
+    [[ -n "$key" ]] || sleep 3
+  done
+  ssh-keygen -lf - <<<"$key" | awk '{print $2}'
 }
 
 # expired_password_dialog <old> <new>
@@ -179,8 +183,18 @@ EOF
 }
 
 # guest <password> <command>
+# OpenSSH penalises connections that never log in, which is what ssh-keyscan does,
+# and drops that source for 15 seconds or more. ssh exits 255 when that happens.
 guest() {
-  SSHPASS="$1" sshpass -e ssh "${SSH_OPTS[@]}" smolofis@127.0.0.1 "$2"
+  local rc deadline=$(( SECONDS + 90 ))
+  while true; do
+    rc=0
+    SSHPASS="$1" sshpass -e ssh "${SSH_OPTS[@]}" smolofis@127.0.0.1 "$2" || rc=$?
+    if [[ $rc -ne 255 ]] || (( SECONDS >= deadline )); then
+      return "$rc"
+    fi
+    sleep 3
+  done
 }
 
 # sshd opens before logins are allowed, so a login right after boot can be
@@ -643,9 +657,32 @@ slot="$(booted_slot)"
 [[ "$slot" == "system-b" ]] || die "rollback booted ${slot}, not system-b"
 log "PASS  a failed update rolled back to the previous slot"
 
-bundle="$(guest "$FINAL_PASSWORD" "sudo smolofis-support" | tail -n 1)"
-guest "$FINAL_PASSWORD" "sudo sh -c '. /etc/smolofis/admin.env; . /etc/smolofis/runner.env; mkdir /tmp/support && tar -xzf ${bundle} -C /tmp/support && test -s /tmp/support/journal.txt && ! grep -rqF -e \"\$GITEA_ADMIN_PASSWORD\" -e \"\$COOLIFY_ADMIN_PASSWORD\" -e \"\$GITEA_RUNNER_REGISTRATION_TOKEN\" /tmp/support'" \
-  || die "support bundle is missing data or contains a secret"
+# Logged-in but still booting, so wait for the stack before judging its logs.
+wait_ready "after the rollback"
+support_rc=0
+support_output="$(guest "$FINAL_PASSWORD" "sudo smolofis-support" 2>&1)" || support_rc=$?
+bundle="$(tail -n 1 <<<"$support_output")"
+if [[ $support_rc -ne 0 || "$bundle" != /var/lib/smolofis/support-*.tar.gz ]]; then
+  echo "smolofis-support exited ${support_rc}: ${support_output}"
+  wait_login "$FINAL_PASSWORD" || true
+  guest "$FINAL_PASSWORD" "uptime -p; sudo journalctl --list-boots --no-pager | tail -n 3; sudo journalctl -b --no-pager -n 30 -u ssh" 2>&1 || true
+  diagnose_guest
+  die "smolofis-support did not produce a bundle"
+fi
+
+leaks="$(guest "$FINAL_PASSWORD" "sudo bash -s ${bundle}" <<'EOF'
+. /etc/smolofis/admin.env
+. /etc/smolofis/runner.env
+mkdir -p /tmp/support
+tar -xzf "$1" -C /tmp/support
+[[ -s /tmp/support/journal.txt ]] || echo "journal.txt is missing"
+for name in GITEA_ADMIN_PASSWORD COOLIFY_ADMIN_PASSWORD GITEA_RUNNER_REGISTRATION_TOKEN; do
+  [[ -n "${!name}" ]] || echo "${name} is empty"
+  grep -rlF -- "${!name}" /tmp/support | sed "s,/tmp/support/,${name} found in ," || true
+done
+EOF
+)"
+[[ -z "$leaks" ]] || die "support bundle failed: ${leaks//$'\n'/, }"
 log "PASS  support bundle works and contains no secrets"
 
 log "install test PASSED (${FIRMWARE})"
