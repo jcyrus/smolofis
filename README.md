@@ -112,7 +112,7 @@ Stack changes ship with the image, so `/etc/smolofis/docker-compose.yml` is repl
 
 ## 💼 Backups
 
-A nightly job archives Gitea, Coolify, deployed apps' Docker volumes and the device's secrets to `/var/lib/smolofis/backups`, keeping the last 7. Gitea and your deployed apps stop for a short time while it runs, around 03:00. Only apps running at that moment are included.
+A nightly job archives Gitea, Coolify, deployed apps' Docker volumes and the device's secrets to `/var/lib/smolofis/backups`, keeping the last 7. Gitea and your deployed apps stop for a short time while it runs, around 03:00 in the appliance's time zone. Set yours with `sudo smolofis-admin timezone Asia/Ho_Chi_Minh`, or the job runs at 03:00 UTC. Only apps running at that moment are included.
 
 ```bash
 sudo smolofis-backup run                # back up now

@@ -9,6 +9,7 @@
 # Usage:
 #   smolofis-admin provision   # run by smolofis-infrastructure.service
 #   sudo smolofis-admin show   # print the admin credentials
+#   sudo smolofis-admin timezone Asia/Ho_Chi_Minh   # scheduled jobs follow this
 
 set -euo pipefail
 
@@ -159,11 +160,21 @@ case "${1:-}" in
         [[ -s "${ADMIN_ENV}" ]] || die "no credentials yet; the stack has not finished its first start"
         # shellcheck disable=SC1090
         source "${ADMIN_ENV}"
+        echo "Initial logins. If a password was changed in the app, these no longer apply."
         printf 'Gitea    (port 3000)  %s / %s\n' "${SMOLOFIS_ADMIN_USER}" "${GITEA_ADMIN_PASSWORD}"
         printf 'Coolify  (port 8000)  %s / %s\n' "${SMOLOFIS_ADMIN_EMAIL}" "${COOLIFY_ADMIN_PASSWORD}"
         ;;
+    timezone)
+        zone="${2:-}"
+        [[ -n "${zone}" && -f "/usr/share/zoneinfo/${zone}" ]] \
+            || die "unknown time zone '${zone}' (for example Asia/Ho_Chi_Minh)"
+        printf '%s\n' "${zone}" > /etc/smolofis/timezone
+        ln -sf "/usr/share/zoneinfo/${zone}" /etc/localtime
+        systemctl daemon-reload
+        log "time zone is ${zone}; nightly backups now run around 03:00 local time"
+        ;;
     *)
-        echo "usage: smolofis-admin provision|show" >&2
+        echo "usage: smolofis-admin provision|show|timezone <zone>" >&2
         exit 2
         ;;
 esac

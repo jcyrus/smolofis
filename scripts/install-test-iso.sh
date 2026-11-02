@@ -543,6 +543,11 @@ suspend_state="$(guest "$FINAL_PASSWORD" "systemctl is-enabled suspend.target" |
 [[ "$suspend_state" == "masked" ]] || die "suspend.target is ${suspend_state:-unknown}, not masked"
 log "PASS  the appliance cannot suspend"
 
+guest "$FINAL_PASSWORD" "sudo smolofis-admin timezone Asia/Ho_Chi_Minh" >/dev/null || die "could not set the time zone"
+if guest "$FINAL_PASSWORD" "sudo smolofis-admin timezone Nowhere/Invalid" >/dev/null 2>&1; then
+  die "an unknown time zone was accepted"
+fi
+
 guest "$FINAL_PASSWORD" "docker exec smolofis-coolify php artisan tinker --execute='echo App\\Models\\Server::find(0)->settings->wildcard_domain;'" | grep -q '\.sslip\.io' \
   || die "Coolify's wildcard domain was not set from the LAN IP"
 log "PASS  Coolify builds app domains from the LAN IP"
@@ -614,6 +619,8 @@ shutdown_vm "$FINAL_PASSWORD"
 boot_vm "updated slot"
 slot="$(booted_slot)"
 [[ "$slot" == "system-b" ]] || die "the update booted ${slot}, not system-b"
+[[ "$(guest "$FINAL_PASSWORD" "date +%Z")" == "+07" ]] || die "the time zone did not survive a reboot"
+log "PASS  the time zone survives a reboot and an update"
 wait_ready "after the A/B update"
 deadline=$(( SECONDS + 120 ))
 until [[ "$(slot_status active)" == "system-b" ]]; do
