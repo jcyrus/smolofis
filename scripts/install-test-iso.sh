@@ -538,7 +538,9 @@ log "PASS  a Gitea Actions job checks out and runs"
 guest "$FINAL_PASSWORD" "test -e /dev/watchdog0" || die "no watchdog device"
 log "PASS  hang watchdog is active"
 
-guest "$FINAL_PASSWORD" "systemctl is-enabled suspend.target" | grep -q masked || die "suspend is not masked"
+# is-enabled exits non-zero for a masked unit, so read its output instead.
+suspend_state="$(guest "$FINAL_PASSWORD" "systemctl is-enabled suspend.target" || true)"
+[[ "$suspend_state" == "masked" ]] || die "suspend.target is ${suspend_state:-unknown}, not masked"
 log "PASS  the appliance cannot suspend"
 
 guest "$FINAL_PASSWORD" "docker exec smolofis-coolify php artisan tinker --execute='echo App\\Models\\Server::find(0)->settings->wildcard_domain;'" | grep -q '\.sslip\.io' \
