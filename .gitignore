@@ -12,3 +12,9 @@ dist/
 *.swp
 .idea/
 .vscode/
+
+# Python helpers used by the disposable identity integration lab
+__pycache__/
+
+# Local browser review artifacts; product/design context remains tracked.
+.impeccable/review/

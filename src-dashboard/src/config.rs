@@ -13,6 +13,8 @@ use std::time::Duration;
 pub struct Config {
     /// Address the dashboard listens on. Traefik routes port 80 here.
     pub bind_addr: SocketAddr,
+    /// Experimental, read-only console. Off by default; loopback until release acceptance.
+    pub console_enabled: bool,
     /// Internal base URL used to health-check Gitea.
     pub gitea_url: String,
     /// Health endpoint path on the Gitea instance.
@@ -47,6 +49,7 @@ impl Config {
     pub fn from_env() -> Self {
         Self {
             bind_addr: env_parsed("SMOLOFIS_BIND", SocketAddr::from(([0, 0, 0, 0], 8090))),
+            console_enabled: env_parsed("SMOLOFIS_CONSOLE_ENABLED", false),
             gitea_url: env_or("SMOLOFIS_GITEA_URL", "http://127.0.0.1:3000"),
             gitea_health_path: env_or("SMOLOFIS_GITEA_HEALTH_PATH", "/api/healthz"),
             coolify_url: env_or("SMOLOFIS_COOLIFY_URL", "http://127.0.0.1:8000"),
@@ -73,6 +76,14 @@ impl Config {
             gitea_public_port: env_parsed("SMOLOFIS_GITEA_PUBLIC_PORT", 3000u16),
             coolify_public_port: env_parsed("SMOLOFIS_COOLIFY_PUBLIC_PORT", 8000u16),
         }
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.console_enabled || self.bind_addr.ip().is_loopback(),
+            "the console preview requires a loopback SMOLOFIS_BIND address until security and deployment acceptance pass"
+        );
+        Ok(())
     }
 }
 
@@ -202,6 +213,7 @@ mod tests {
     fn from_env_uses_appliance_defaults() {
         let _lock = env_lock();
         let keys = [
+            "SMOLOFIS_CONSOLE_ENABLED",
             "SMOLOFIS_GITEA_URL",
             "SMOLOFIS_GITEA_HEALTH_PATH",
             "SMOLOFIS_DOCKER_SOCKET",
@@ -216,10 +228,35 @@ mod tests {
         }
 
         let cfg = Config::from_env();
+        assert!(!cfg.console_enabled);
         assert_eq!(cfg.gitea_url, "http://127.0.0.1:3000");
         assert_eq!(cfg.gitea_health_path, "/api/healthz");
         assert_eq!(cfg.docker_socket, PathBuf::from("/var/run/docker.sock"));
         assert_eq!(cfg.poll_interval, Duration::from_secs(3));
         assert_eq!(cfg.gitea_public_port, 3000);
+    }
+
+    #[test]
+    fn console_flag_fails_closed_and_requires_loopback() {
+        let _lock = env_lock();
+        let _env = EnvSnapshot::capture(&["SMOLOFIS_CONSOLE_ENABLED"]);
+        for invalid in ["", "1", "yes", "TRUE", "invalid"] {
+            std::env::set_var("SMOLOFIS_CONSOLE_ENABLED", invalid);
+            assert!(!Config::from_env().console_enabled);
+        }
+        std::env::set_var("SMOLOFIS_CONSOLE_ENABLED", "true");
+        let mut cfg = Config::from_env();
+        assert!(cfg.console_enabled);
+        for address in ["127.0.0.1:8090", "[::1]:8090"] {
+            cfg.bind_addr = address.parse().unwrap();
+            assert!(cfg.validate().is_ok());
+        }
+        for address in ["0.0.0.0:8090", "[::]:8090", "192.168.1.10:8090"] {
+            cfg.bind_addr = address.parse().unwrap();
+            assert!(cfg.validate().is_err());
+            cfg.console_enabled = false;
+            assert!(cfg.validate().is_ok());
+            cfg.console_enabled = true;
+        }
     }
 }

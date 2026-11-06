@@ -1,0 +1,114 @@
+# Disposable integration lab. No host ports, host paths, or Docker socket.
+name: smolofis-identity-lab
+
+x-lab: &lab
+  image: smolofis-identity-lab:local
+  networks: [identity]
+
+services:
+  dc:
+    <<: *lab
+    build: .
+    hostname: dc
+    domainname: lab.smolofis.test
+    command: [dc]
+    networks:
+      identity:
+        ipv4_address: 10.83.0.10
+    volumes:
+      - directory:/var/lib/samba
+      - directory-config:/etc/samba
+      - credentials:/lab
+    healthcheck:
+      test: [CMD-SHELL, "test -f /lab/ready && samba-tool domain info 127.0.0.1 >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  files:
+    <<: *lab
+    hostname: files
+    domainname: lab.smolofis.test
+    command: [files]
+    dns: [10.83.0.10]
+    depends_on:
+      dc:
+        condition: service_healthy
+    volumes:
+      - member:/var/lib/samba
+      - member-config:/etc/samba
+      - shares:/srv/shares
+      - credentials:/lab:ro
+      - evidence:/evidence
+    healthcheck:
+      test: [CMD-SHELL, "wbinfo -t >/dev/null && pgrep -x smbd >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  gitea:
+    image: gitea/gitea:28.2.0
+    hostname: git
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__service__DISABLE_REGISTRATION: "true"
+      GITEA__server__ROOT_URL: http://git:3000/
+      GITEA__session__PROVIDER: memory
+      # sessions command temporarily uses 31 to exercise an existing remembered login.
+      GITEA__security__LOGIN_REMEMBER_DAYS: "${SMOLOFIS_LAB_REMEMBER_DAYS:-0}"
+    networks: [identity]
+    volumes:
+      - git:/data
+      - credentials:/lab:ro
+    depends_on:
+      dc:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD-SHELL, "wget -q --spider http://127.0.0.1:3000/api/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  verify:
+    <<: *lab
+    profiles: [test]
+    command: [verify]
+    dns: [10.83.0.10]
+    volumes:
+      - credentials:/lab:ro
+      - evidence:/evidence
+    depends_on:
+      files:
+        condition: service_healthy
+      gitea:
+        condition: service_started
+
+  maintenance:
+    image: smolofis-identity-lab:local
+    profiles: [test]
+    network_mode: none
+    entrypoint: [python3, /usr/local/bin/lab-revoke-sessions]
+    volumes:
+      - git:/gitea
+      - evidence:/evidence
+
+networks:
+  identity:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.83.0.0/24
+
+volumes:
+  directory:
+  directory-config:
+  credentials:
+  member:
+  member-config:
+  shares:
+  git:
+  evidence:

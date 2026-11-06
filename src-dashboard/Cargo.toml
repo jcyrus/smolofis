@@ -14,10 +14,16 @@ publish = false
 anyhow = "1"
 askama = "0.16"
 axum = "0.8.9"
-# Plain HTTP to local services only, so no TLS stack.
+ldap3 = { version = "0.12.1", default-features = false, features = ["tls-rustls-ring"] }
+rand = "0.8"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+url = "2"
+zeroize = "1"
+# HTTP health probes only; directory LDAPS uses the separate Rustls client.
 reqwest = { version = "0.13.4", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 sysinfo = "0.39.3"
 tokio = { version = "1.38", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "0.1"

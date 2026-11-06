@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{% if account %}Your session{% else %}Sign in{% endif %} · SmolOfis</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%2334664b'/%3E%3Cpath d='M5 7h14M5 12h10M5 17h6' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/assets/console.css">
+</head>
+<body class="auth-body">
+<main class="auth-main" id="main">
+  <a class="auth-brand" href="/console">SmolOfis</a>
+  {% if account %}
+  <h1>Your admin session</h1>
+  <p>You are signed in with an office administrator account.</p>
+  <form method="post" action="/auth/logout" class="auth-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="button primary">Sign out</button>
+    <a class="auth-back" href="/console">Back to the console</a>
+  </form>
+  <p class="auth-help">Signing out ends this browser session. Your other office services stay signed in.</p>
+  {% else %}
+  <h1>Welcome back</h1>
+  <p>Sign in with your office administrator account.</p>
+  {% if error != "" %}<div class="auth-error" role="alert">{{ error }}</div>{% endif %}
+  <form method="post" action="/auth/login" class="auth-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="auth-field"><label for="username">Office username</label><input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="64" required aria-describedby="username-help"><span id="username-help">Use your username, without the domain.</span></div>
+    <div class="auth-field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" maxlength="1024" required></div>
+    <button type="submit" class="button primary">Sign in</button>
+  </form>
+  <p class="auth-help">Need access? Ask your office administrator to add you to the console administrator group.</p>
+  {% endif %}
+</main>
+</body>
+</html>

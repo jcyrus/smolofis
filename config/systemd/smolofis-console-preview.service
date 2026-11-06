@@ -1,0 +1,34 @@
+# Opt-in test candidate. Not installed/enabled by build-image.sh.
+[Unit]
+Description=SmolOfis enrolled console preview (loopback only)
+After=network.target
+
+[Service]
+Type=exec
+ExecStart=/usr/local/bin/smolofis-panel --private-console
+User=smolofis-panel
+Group=smolofis-panel
+Restart=on-failure
+RestartSec=3
+Environment=SMOLOFIS_DATA_PATH=/var/lib/smolofis
+Environment=SMOLOFIS_DOCKER_UNIT=docker.service
+Environment=RUST_LOG=info
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# No Install section. --private-console fixes 127.0.0.1:8091 and requires the
+# root-owned /etc/smolofis/panel-auth.json and panel-enrollment.json files.

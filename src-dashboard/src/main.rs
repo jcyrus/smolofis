@@ -5,9 +5,17 @@
 //! then flips to the live dashboard once Docker, Gitea and Coolify report
 //! healthy.
 
+#[cfg(unix)]
+mod admin_worker;
+mod audit;
+mod auth;
 mod config;
+mod console;
+mod directory;
+mod enrollment;
 mod handlers;
 mod system;
+mod transport;
 
 use std::sync::Arc;
 
@@ -26,7 +34,36 @@ async fn main() -> anyhow::Result<()> {
         .compact()
         .init();
 
-    let config = config::Config::from_env();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let private_preview = args.as_slice() == ["--private-console"];
+    if !args.is_empty() && !private_preview {
+        if args.len() == 3 && args[0] == "--console-access-check" {
+            return transport::check(
+                std::path::Path::new(&args[1]),
+                std::path::Path::new(&args[2]),
+            )
+            .await;
+        }
+        if args[0].starts_with("--auth-") {
+            return enrollment::command(&args).await;
+        }
+        #[cfg(unix)]
+        if args.len() == 3 && args[0] == "--admin-worker" {
+            let uid = args[2]
+                .parse::<u32>()
+                .context("panel UID must be numeric")?;
+            return admin_worker::serve(std::path::Path::new(&args[1]), uid).await;
+        }
+        anyhow::bail!("usage: smolofis-panel [--admin-worker /absolute/socket/path panel-uid]");
+    }
+
+    let mut config = config::Config::from_env();
+    if private_preview {
+        // The separate private service cannot be widened by environment overrides.
+        config.console_enabled = true;
+        config.bind_addr = "127.0.0.1:8091".parse().expect("fixed loopback address");
+    }
+    config.validate()?;
     info!(
         version = env!("CARGO_PKG_VERSION"),
         bind = %config.bind_addr,
@@ -36,16 +73,47 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(system::AppState::new(config.clone()));
     system::spawn_poller(Arc::clone(&state));
 
-    // TODO: add a panel login. The panel is unauthenticated read-only telemetry,
-    // reachable through Traefik on port 80. Traefik basic auth on its route is the
-    // simplest option; CI reads /api/state and would need credentials.
-    let app = Router::new()
+    let mut app = Router::new()
         .route("/", get(handlers::dashboard))
         .route("/api/state", get(handlers::api_state))
         .route("/healthz", get(handlers::healthz))
         .route("/assets/app.css", get(handlers::asset_css))
         .route("/assets/fonts/{file}", get(handlers::asset_font))
-        .with_state(state);
+        .merge(console::routes(config.console_enabled));
+    let auth_config = if private_preview {
+        Some(std::ffi::OsString::from("/etc/smolofis/panel-auth.json"))
+    } else {
+        std::env::var_os("SMOLOFIS_AUTH_CONFIG")
+    };
+    let auth_state = if private_preview {
+        Some(std::ffi::OsString::from(
+            "/etc/smolofis/panel-enrollment.json",
+        ))
+    } else {
+        std::env::var_os("SMOLOFIS_AUTH_STATE")
+    };
+    anyhow::ensure!(
+        auth_state.is_none() || auth_config.is_some(),
+        "enrollment state requires authentication configuration"
+    );
+    if let Some(path) = auth_config {
+        anyhow::ensure!(
+            config.console_enabled,
+            "authentication preview requires the console flag"
+        );
+        let auth = auth::Auth::load_with_enrollment(
+            std::path::Path::new(&path),
+            auth_state.as_deref().map(std::path::Path::new),
+        )?;
+        if private_preview {
+            transport::private_host(auth.private_transport_origin()?)?;
+        }
+        app = app
+            .merge(auth::routes())
+            .layer(axum::middleware::from_fn(auth::guard))
+            .layer(axum::Extension(auth));
+    }
+    let app = app.with_state(state);
 
     let listener = tokio::net::TcpListener::bind(config.bind_addr)
         .await
