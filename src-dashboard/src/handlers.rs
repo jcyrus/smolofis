@@ -221,7 +221,7 @@ fn service_cards(state: &AppState, snap: &Snapshot) -> Vec<ServiceCard> {
         .collect()
 }
 
-fn pct(used: u64, total: u64) -> u8 {
+pub(crate) fn pct(used: u64, total: u64) -> u8 {
     if total == 0 {
         return 0;
     }
@@ -230,11 +230,11 @@ fn pct(used: u64, total: u64) -> u8 {
         .clamp(0.0, 100.0) as u8
 }
 
-fn fmt_gib(bytes: u64) -> String {
+pub(crate) fn fmt_gib(bytes: u64) -> String {
     format!("{:.1}", bytes as f64 / 1_073_741_824.0)
 }
 
-fn fmt_uptime(secs: u64) -> String {
+pub(crate) fn fmt_uptime(secs: u64) -> String {
     let days = secs / 86_400;
     let hours = (secs % 86_400) / 3_600;
     let mins = (secs % 3_600) / 60;

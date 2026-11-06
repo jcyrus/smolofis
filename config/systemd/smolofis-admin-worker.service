@@ -1,0 +1,32 @@
+# Experimental: not installed or enabled by build-image.sh.
+# Requires a root-owned /etc/smolofis/admin-worker.env containing PANEL_UID=<numeric
+# uid of smolofis-panel>. No account or service mutation operations exist yet.
+[Unit]
+Description=SmolOfis administration protocol worker (experimental)
+After=local-fs.target
+
+[Service]
+Type=simple
+User=root
+Group=smolofis-panel
+EnvironmentFile=/etc/smolofis/admin-worker.env
+ExecStart=/usr/local/bin/smolofis-panel --admin-worker /run/smolofis-admin/control.sock ${PANEL_UID}
+RuntimeDirectory=smolofis-admin
+RuntimeDirectoryMode=0750
+UMask=0077
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+ReadWritePaths=/run/smolofis-admin
+# No Install section: this prototype must be started explicitly.

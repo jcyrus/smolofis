@@ -10,6 +10,8 @@
 #   smolofis-admin provision   # run by smolofis-infrastructure.service
 #   sudo smolofis-admin show   # print the admin credentials
 #   sudo smolofis-admin timezone Asia/Ho_Chi_Minh   # scheduled jobs follow this
+#   systemd-ask-password 'Office admin password:' | sudo smolofis-admin console-enroll username
+#   sudo smolofis-admin console-status|console-lock
 
 set -euo pipefail
 
@@ -145,6 +147,20 @@ prune_old_images() {
 }
 
 case "${1:-}" in
+    console-access-check)
+        [[ $# -eq 1 ]] || die "this command takes no additional arguments"
+        exec /usr/local/bin/smolofis-panel --console-access-check \
+            /etc/smolofis/panel-auth.json /etc/smolofis/panel-enrollment.json
+        ;;
+    console-enroll)
+        [[ $# -eq 2 ]] || die "usage: smolofis-admin console-enroll username (password on stdin)"
+        exec /usr/local/bin/smolofis-panel --auth-enroll \
+            /etc/smolofis/panel-auth.json /etc/smolofis/panel-enrollment.json "$2"
+        ;;
+    console-status|console-lock)
+        [[ $# -eq 1 ]] || die "this command takes no additional arguments"
+        exec /usr/local/bin/smolofis-panel "--auth-${1#console-}" /etc/smolofis/panel-enrollment.json
+        ;;
     provision)
         # The firewall goes first: a slow or failing service must not leave it open.
         close_panel_port
@@ -174,7 +190,7 @@ case "${1:-}" in
         log "time zone is ${zone}; nightly backups now run around 03:00 local time"
         ;;
     *)
-        echo "usage: smolofis-admin provision|show|timezone <zone>" >&2
+        echo "usage: smolofis-admin provision|show|timezone <zone>|console-enroll <username>|console-status|console-lock|console-access-check" >&2
         exit 2
         ;;
 esac

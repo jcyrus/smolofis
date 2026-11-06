@@ -1,0 +1,18 @@
+# Opt-in extension: mounts only the selected Linux binary read-only.
+# No host ports or Docker socket. The panel binds loopback inside this runner.
+services:
+  panel-auth:
+    image: smolofis-identity-lab:local
+    profiles: [test]
+    networks: [identity]
+    entrypoint: [python3, /usr/local/bin/lab-panel-auth]
+    command: [verify]
+    volumes:
+      - credentials:/lab:ro
+      - type: bind
+        source: ${SMOLOFIS_LAB_PANEL_BINARY:?select a Linux panel binary}
+        target: /panel/smolofis-panel
+        read_only: true
+    depends_on:
+      dc:
+        condition: service_healthy

@@ -184,6 +184,7 @@ run_in_chroot "apt-get install -y --no-install-recommends \
     firmware-realtek \
     firmware-intel-graphics \
     systemd-timesyncd \
+    libpam-systemd \
     curl \
     gnupg \
     iptables \

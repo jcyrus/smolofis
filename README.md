@@ -171,6 +171,41 @@ Because this project is actively evolving, breaking changes to the configuration
 
 ## 🗺️ Implementation Roadmap
 
+The responsive administration console and centralized identity work is tracked
+in the [admin UI implementation checklist](docs/admin-ui-plan.md). The
+[identity prototype protocol](docs/identity-prototype.md) records preliminary
+integration results and the remaining acceptance checks.
+
+### Administration console preview
+
+The new console is disabled by default. To review it locally:
+
+```bash
+SMOLOFIS_CONSOLE_ENABLED=true SMOLOFIS_BIND=127.0.0.1:18090 \
+  cargo run --locked --manifest-path src-dashboard/Cargo.toml
+```
+
+Open [the console preview](http://127.0.0.1:18090/console). It displays real
+telemetry and service checks, offers Gitea/Coolify launchers and copyable
+diagnostics, and adapts to desktop and phone layouts. Appearance preferences
+apply to the current browser. Account and folder management show their
+not-connected state; this preview does not change appliance configuration.
+
+The preview requires a loopback bind while security and deployment acceptance
+remain open; a LAN or wildcard bind is rejected. With the flag off, console
+pages and assets return 404 and the existing dashboard remains available.
+The remaining platform and security checks are release gates for the new
+administration features.
+
+An opt-in [directory sign-in preview](docs/admin-sign-in.md) now protects the
+console, classic panel, and telemetry with a dedicated administrator group.
+It includes expiring sessions, CSRF checks, and login throttling, and remains
+restricted to loopback. Optional [local enrollment and recovery controls](docs/admin-enrollment.md)
+bind access to the device and let a console/SSH operator inspect or lock access
+without a working directory. An opt-in [private HTTPS transport candidate](docs/admin-private-access.md)
+adds a separate enrolled loopback backend and Tailscale Serve unit with prerequisite
+checks. Live tailnet/certificate acceptance and production deployment remain pending.
+
 ### Phase 1: Core Dashboard ✅
 - [x] Scaffold workspace structure.
 - [x] Implement asynchronous service status polling using `tokio` and `reqwest`.

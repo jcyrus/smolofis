@@ -1,0 +1,254 @@
+# Administration UI implementation tracker
+
+Build a responsive, umbrelOS-inspired administration console on the existing
+Rust/Axum/Askama panel. Primary tasks: people and groups, shared folders, and
+service diagnosis. Central identities apply to hosted services; employee
+computer sign-in is deferred.
+
+Update this file with evidence as work completes. A checked milestone means
+its acceptance criteria have passed, not merely that code exists.
+
+## R0 — Nightly rollout with administration disabled
+
+- [ ] Review and commit the implementation on current main, preserving disabled console/authentication defaults and excluding candidate service units from image installation.
+- [ ] Pass CI lint/advisory/unit tests, ISO boot/install checks, and upgrade from the previous published nightly.
+- [ ] Publish the signed nightly and record its exact commit/version.
+- [x] Inspect 192.168.1.17: 0.1.0-dev.68, system-a active, release signers present, recent backups, ample free space, healthy core containers; administration flags absent.
+- [x] Diagnose pre-existing user@1000.service failure: missing libpam-systemd. Candidate adds the package and an installed-user-session acceptance check; CI and server verification remain required.
+- [ ] Stage the signed nightly through the existing updater with a fresh backup, then reboot and verify version, active slot, data/services, and administration still disabled.
+
+R0 permits code delivery with features disabled; it does not authorize enabling
+identity administration or replace M0/M1/M6 acceptance.
+
+## M0 — Identity feasibility gate (acceptance tasks)
+
+- [x] Inspect current panel, persistence, service privilege boundaries, and local development tooling.
+- [x] Add and run an isolated container integration harness for preliminary identity testing.
+- [x] Prove certificate-verified LDAPS, Gitea directory login, and SMB permissions in the container lab.
+- [x] Test password rotation, fresh-login denial when disabled, and GUID/SID stability after service restarts in the container lab.
+- [x] Migrate an existing local Gitea account through its supported API, preserving account ID, repository ownership/history, working SSH key, and API token.
+- [x] Demonstrate directory-disable limitations and explicitly block Gitea access; permanently revoke synthetic API tokens and SSH keys.
+- [x] Restore a stopped, consistent container snapshot into fresh volumes; verify identity, Gitea mapping/history, file contents, numeric ownership, ACLs, and extended attributes.
+- [x] Prove permanent browser-session revocation in the container lab, including re-enabling and replay of valid legacy remembered-login cookies, using the approved office-wide sign-out policy.
+- [x] Revoke an already-authenticated SMB connection after account disabling or group removal, preserving another user's live connection and the file-server master process in the container lab.
+- [ ] Provision an isolated Debian 13 VM with Samba AD and an SMB file service.
+- [ ] Prove directory authentication against the shipped Gitea version on the full VM.
+- [ ] Prove group-based read-only/read-write SMB access from Windows and macOS.
+- [ ] Verify password changes, account disabling, stable ownership, and existing Gitea account migration on the full VM.
+- [ ] Verify DNS, time, kernel reboot persistence, and directory backup/restore on the full VM.
+- [ ] Finalize deployment topology and the full-VM evidence report.
+
+Release gate: do not enable or release identity administration until this
+prototype passes. The user approved continuing console implementation behind
+a flag disabled by default while retaining full VM/native-client acceptance
+as release gates. Revise the architecture explicitly if the prototype fails.
+See [prototype protocol](identity-prototype.md).
+
+## M1 — Secure administration
+
+- [x] Add an isolated protocol-status-only Unix worker scaffold with peer-UID checks, bounded requests, strict typed decoding, and a candidate systemd unit excluded from image construction.
+- [x] Implement opt-in directory-backed panel sessions and a dedicated administrator group; pass preliminary container acceptance. Production deployment remains gated below and by M0.
+- [x] Add preview sign-in/sign-out forms, CSRF validation, bounded in-memory throttling, session expiry, and fail-closed directory revalidation.
+- [x] Preview device-specific first-admin enrollment through local console/SSH, verifying an existing directory administrator and binding its GUID/configuration to the appliance machine ID.
+- [x] Preview directory-independent local status/lock controls and verified re-enrollment after connectivity returns. Directory repair and full restore acceptance remain M0/M6 gates.
+- [x] Add an opt-in private HTTPS transport candidate: fixed loopback backend, required HTTPS enrollment, read-only Tailscale/backend preflight, and separate foreground-Serve service units. Preliminary local TLS acceptance passes.
+- [ ] Validate HTTPS/private Tailscale access on the full VM and real tailnet: certificate issuance/renewal, policy isolation, phone access, foreground cleanup, and actual service sandbox execution.
+- [ ] Separate privileged service with restricted Unix socket and typed, allowlisted operations.
+- [ ] CSRF protection, login throttling, secure sessions, and secret-free auditing.
+- [ ] Authenticate telemetry/management APIs and update CI; preserve public liveness.
+
+## M2 — Responsive console
+
+- [x] Add a read-only console preview behind `SMOLOFIS_CONSOLE_ENABLED=false` by default, restricted to loopback until security and deployment acceptance pass.
+- [x] Implement overview, service diagnostics/app launchers, appearance controls, and explicit not-connected states for account/share administration.
+- [x] Verify flag-off routes/assets return 404 and non-loopback preview configuration is rejected.
+- [x] Read-only home with health, problem guidance, and administration destinations.
+- [x] People & Groups and Shared Folders destination pages with explicit not-connected states; Service Health and Gitea/Coolify launchers. Working management remains in M3/M4.
+- [x] Offline embedded assets, server-rendered initial data, and a small JavaScript module.
+- [x] Mobile and keyboard navigation, reduced motion, and accessible controls verified in the preview.
+- [x] Preview states for Live USB, initializing, degraded, disconnected, and unconnected directory management. Live directory availability requires M1/M3 integration.
+
+## M3 — People and groups
+
+- [ ] Create users, reset passwords, disable accounts, and edit groups.
+- [ ] Immutable directory IDs and explicit service mappings.
+- [ ] Separate application access from administrator privileges.
+- [ ] Gitea directory login; repository authorization remains in Gitea.
+- [ ] Reviewed migration of existing Gitea accounts preserving ownership/history.
+- [ ] Explicit revocation of SMB/panel sessions and Gitea tokens/SSH access.
+- [ ] Integrate the tested office-wide Gitea browser sign-out operation with version/schema checks, service downtime notice, and partial-failure reporting.
+
+## M4 — Shared folders
+
+- [ ] Managed persistent share root and validated names/path containment.
+- [ ] Group-based no-access/read-only/read-write permissions and effective access display.
+- [ ] Atomic validated configuration changes with rollback on failure.
+- [ ] Windows/macOS connection instructions using reachable addresses.
+- [ ] Remove share definitions while retaining files; no permanent file deletion.
+
+## M5 — Service recovery
+
+- [ ] Directory, SMB, Docker, Gitea, runner, and Coolify health with dependencies.
+- [ ] Plain-language impact and bounded sanitized diagnostics.
+- [ ] Explicit targeted SMB/application restarts with disruption warnings.
+- [ ] Directory/Docker-wide recovery remains diagnostic-only initially.
+- [ ] Concurrency control, durable operation results, audit trail, and post-action checks.
+
+## M6 — Appliance lifecycle
+
+- [ ] Persist identities, shares, permissions, and service mappings across reboot/upgrades.
+- [ ] Consistent backup/restore of directory, shared files/ACLs, and Gitea.
+- [ ] Invalidate restored browser sessions and remembered logins before exposing restored Gitea to clients.
+- [ ] Sanitized support bundles and operator documentation.
+- [ ] VM install, restore, signed A/B upgrade, and rollback tests.
+- [ ] Windows/macOS client acceptance and remote mobile administration.
+
+## Interface rules
+
+Retain Rust and Askama. Use authenticated resources for users, groups, shares,
+diagnostics, and operations. Long-running changes return durable operation IDs.
+Never accept arbitrary shell commands, paths, or systemd units through the
+privileged API. Do not merge accounts automatically by email. Record partial
+failures and never log credentials.
+
+## Evidence and decisions
+
+- Initial inspection: panel is read-only and unauthenticated, runs as
+  `smolofis-panel` with systemd hardening, and has no Docker socket access.
+- No Samba configuration or directory service exists in the repository.
+- Persistence currently covers `/etc/smolofis` and `/var/lib/smolofis`, among
+  other paths; directory state and ACL preservation need explicit integration.
+- Local tooling: Docker client available; QEMU executable not found on PATH.
+- No production identity or UI milestone has passed yet.
+- Preliminary M0 container checks passed on 2026-11-04. Commands, exact
+  versions, results, and remaining limitations are in the prototype protocol.
+  This is not VM/client/lifecycle acceptance; M0 remains open.
+- Extended container tests passed: `bash scripts/identity-lab.sh migration` and
+  `bash scripts/identity-lab.sh backup`. The latter also repeats migration and
+  verifies the restored system before removing its disposable containers.
+- Offboarding finding: directory disablement alone leaves Gitea API tokens,
+  SSH keys, and browser sessions usable. Gitea login prohibition blocks them;
+  deleting tokens/keys keeps those credentials revoked after re-enabling.
+  Browser sessions can resume after re-enabling if no further action is taken.
+- Approved v1 policy: office-wide Gitea browser sign-out is acceptable when
+  disabling an account. The container lab now uses memory sessions and zero-day
+  remembered logins. A Gitea restart plus a version-checked offline cleanup of
+  persisted remembered-login tokens prevents old sessions from resuming.
+- `bash scripts/identity-lab.sh sessions` passed, including a working
+  remember-cookie-only positive control, post-revocation replay denial,
+  preservation of another user's API token, and non-mutating refusal of
+  mismatched targets/unsupported database engines. This remains lab-only;
+  production integration belongs to M1/M3.
+- Native-machine attempt: an isolated Debian 13 amd64 OrbStack machine reports
+  an LXC runtime. Standard Samba provisioning fails with
+  `NT_STATUS_ACCESS_DENIED` when setting SYSVOL NT ACLs. This is not a full VM
+  and does not satisfy the native filesystem/boot gate. No ACL workaround was
+  applied. The provisioner now refuses to reuse a partially created domain.
+- `bash scripts/identity-lab.sh live-smb` passed for both account disabling and
+  group removal. Targeted worker revocation preserves the master and a live
+  unrelated reader; the account and group membership are restored afterward.
+- Approved decision: continue M1/M2 behind a disabled feature flag. Full VM,
+  native-client, security, and lifecycle checks remain release gates. The
+  current preview is read-only and loopback-only; M1 authentication and
+  privileged management remain unfinished.
+- The user chose direct code implementation followed by screenshot review.
+- Read-only console validation: 34 Rust tests pass; Clippy with warnings denied,
+  formatting, and JavaScript syntax checks pass. Chrome automation passed 23
+  checks covering all five pages at desktop/mobile widths, 320px layout,
+  appearance persistence, diagnostics copying, connection loss/recovery,
+  malformed data, safe text rendering, and reduced motion.
+- Independent UI review identified a squeezed mobile health summary; the count
+  now occupies its own row, verified at 390px and 320px. Screenshots and browser
+  reports are local ignored artifacts under `.impeccable/review/`.
+- Console design guidance is recorded in `DESIGN.md` and
+  `.impeccable/design.json`. M1 secure administration remains in progress;
+  the preview does not manage
+  accounts, permissions, shares, or service restarts.
+- M1 boundary groundwork: `--admin-worker` accepts only protocol status over a
+  filesystem-restricted Unix socket and checks the OS peer UID independently.
+  Unknown fields/operations, oversized requests, incomplete requests, and
+  unsafe runtime directories are rejected; handler concurrency and duration
+  are bounded. There are no mutation operations or HTTP integration. See
+  [worker protocol](admin-worker.md). The candidate unit is not installed or
+  enabled by image construction. Linux systemd acceptance, authorization,
+  durable operation auditing, and actual privileged operations remain open.
+- Worker validation: 38 Rust tests pass, including caller mismatch, oversized
+  and incomplete input, request timeout, protocol rejection, and unsafe startup
+  paths. Clippy with warnings denied and formatting checks pass. These tests
+  ran on macOS; the Linux unit has not been exercised.
+- Authentication preview: real Samba LDAPS acceptance passed for administrator
+  sign-in, denial of non-admins and wrong passwords, group removal/account
+  disabling with observed-session revocation, CSRF-protected sign-out, and
+  rejection of an untrusted CA and certificate hostname mismatch. The Linux
+  binary runs on the internal lab network without published host ports.
+- The authentication configuration is opt-in; when configured it protects
+  console/classic pages and telemetry, with public assets/sign-in/liveness.
+  The console still requires a loopback bind. At that checkpoint enrollment,
+  recovery, HTTPS,
+  durable actor-attributed auditing, CI credentials, explicit lifecycle
+  revocation, privileged operations, and production wiring remain unfinished.
+  See [sign-in configuration and limits](admin-sign-in.md).
+- Final authentication evidence: 10 real Samba-container acceptance checks and
+  10 Chrome checks passed, including nested administrator membership and native
+  no-JavaScript form rendering. The independent UI reviewer returned `ship`
+  for the authentication UI/account link only; design documentation review
+  preserved the incumbent system. All 45 Rust regression tests pass (one
+  manual browser fixture is ignored by default). Clippy with warnings
+  denied, formatting, and dependency advisory checks pass. The Linux ARM64
+  test binary is statically linked. Browser fixtures and the directory lab were
+  stopped after verification; volumes were retained.
+- Local enrollment/recovery preview: root-only CLI commands verify a directory
+  administrator through protected stdin, atomically persist a machine/config
+  binding, and rotate session generations. Offline status/lock commands do not
+  contact the directory. Re-enrollment preserves device identity and permanently
+  invalidates prior sessions, including sessions not observed during lockdown.
+- Ten preliminary Samba-container enrollment/recovery checks passed with an
+  unprivileged panel process: invalid enrollments leave no state, root-only
+  ownership checks work, unsafe/malformed/symlink/foreign state fails closed,
+  concurrent commands are serialized, and lockdown survives process restart.
+  The preview remains opt-in through `SMOLOFIS_AUTH_STATE`; existing sign-in-only
+  development mode is unchanged. See [local enrollment guide](admin-enrollment.md).
+- Next M1 work: deployment transport/access and durable audited operations.
+  Full VM, kernel reboot, native-client, directory repair/restore, and production
+  security acceptance remain release gates.
+- Enrollment regression validation: 48 Rust tests pass (one manual browser
+  fixture is ignored by default), including stale-generation cleanup at the
+  session capacity limit. Clippy with warnings denied, formatting, shell syntax,
+  Python compilation, and whitespace checks pass. No frontend layout changed.
+  The updated Linux binary passed all ten enrollment/recovery checks again;
+  the disposable lab was stopped afterward and its volumes retained.
+- Private HTTPS groundwork: `--private-console` fixes 127.0.0.1:8091 and the
+  root-owned enrollment/configuration paths, ignoring environment attempts to
+  widen or disable its security requirements. The candidate units are excluded
+  from image installation/enabling. The legacy panel/proxy is unchanged.
+- `console-access-check` validates unlocked enrollment, HTTPS node identity,
+  online local Tailscale status, empty Serve/Funnel/service configuration,
+  protected backend telemetry and Secure cookies. It only invokes local
+  read-only status commands; foreground Serve activation is a separate opt-in
+  unit start. No real tailnet or policy was modified.
+- HTTPS evidence: 51 Rust tests pass (one manual browser fixture ignored),
+  Clippy with warnings denied and formatting/syntax checks pass. Nine internal
+  lab checks passed with an unprivileged backend, real TLS/certificate checking,
+  Samba LDAPS sign-in, Secure-cookie/Host checks, local lockdown, and controlled
+  Tailscale status fixtures. Static systemd verification passed in a disposable
+  Debian 13 tools container with a stub Tailscale dependency; this does not prove
+  real service execution, live Serve, certificate issuance, or tailnet policy.
+  See [private access guide](admin-private-access.md). Next implementation work
+  is durable actor-attributed auditing; real-node transport acceptance remains open.
+- Transport decision: defer HSTS while HTTP application launchers share the
+  node hostname. A host-wide upgrade policy would break those application ports;
+  HTTPS and Secure cookies remain required for the private console.
+- Final transport rerun passed all nine checks with an unprivileged UID/GID
+  and no inherited root groups. No HSTS header is emitted while shared HTTP
+  app links remain. The disposable lab was stopped and its volumes retained.
+
+- Audit groundwork: optional `SMOLOFIS_AUDIT_FILE` adds bounded, synced JSONL
+  authentication events with immutable directory GUID attribution. Sign-in fails
+  closed on audit errors; sign-out/revocation still invalidate local sessions.
+  Local enrollment/lockdown events, privileged-operation auditing, log archival
+  integration, Linux file-ownership acceptance and fault injection remain open.
+  See [audit preview](admin-audit.md). No production service wiring changed.
+- Audit validation: 54 Rust tests pass (one manual fixture ignored), including
+  HTTP login denial without cookie/session issuance at audit capacity. Clippy
+  with warnings denied, formatting and whitespace checks pass. The complete
+  durable-auditing milestone remains open; this step covers authentication only.

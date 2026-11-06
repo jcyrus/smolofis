@@ -475,6 +475,7 @@ mod tests {
     fn base_config() -> Config {
         Config {
             bind_addr: "127.0.0.1:0".parse().unwrap(),
+            console_enabled: false,
             gitea_url: "http://127.0.0.1:0".to_string(),
             gitea_health_path: "/api/healthz".to_string(),
             coolify_url: "http://127.0.0.1:0".to_string(),

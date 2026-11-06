@@ -1,0 +1,34 @@
+# Opt-in test candidate. No install/enable action is performed by image builds.
+[Unit]
+Description=Private HTTPS for the SmolOfis enrolled console preview
+Requires=smolofis-console-preview.service tailscaled.service
+After=smolofis-console-preview.service tailscaled.service
+BindsTo=smolofis-console-preview.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+# Refuses untrusted/locked enrollment, wrong/offline node, any existing Serve
+# or Funnel configuration, public telemetry, and insecure login cookies.
+ExecStartPre=/usr/local/bin/smolofis-panel --console-access-check /etc/smolofis/panel-auth.json /etc/smolofis/panel-enrollment.json
+# Foreground Serve owns a temporary local-agent session. Stopping this unit
+# ends that session; no global reset or persistent --bg configuration is used.
+ExecStart=/usr/bin/tailscale serve --https=443 http://127.0.0.1:8091
+TimeoutStartSec=30
+TimeoutStopSec=15
+Restart=no
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# No Install section. No Funnel command, public listener, or tailnet ACL edits.
