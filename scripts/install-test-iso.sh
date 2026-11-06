@@ -565,6 +565,15 @@ log "PASS  the installed system has a console login"
 guest "$FINAL_PASSWORD" "test -n \"\$XDG_RUNTIME_DIR\" && systemctl is-active user@1000.service" >/dev/null \
   || die "the installed system has no working PAM/systemd user session"
 log "PASS  the installed system has a working PAM/systemd user session"
+for preview_path in /console /auth/login /assets/console.css /assets/console.js; do
+  [[ "$(guest "$FINAL_PASSWORD" "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8090${preview_path}")" == 404 ]] \
+    || die "administration preview unexpectedly exposed: ${preview_path}"
+done
+guest "$FINAL_PASSWORD" "test ! -e /etc/systemd/system/smolofis-admin-worker.service && \
+  test ! -e /etc/systemd/system/smolofis-console-preview.service && \
+  test ! -e /etc/systemd/system/smolofis-console-https-preview.service" \
+  || die "administration candidate units unexpectedly installed"
+log "PASS  administration previews remain disabled in the installed image"
 
 guest "$FINAL_PASSWORD" "sudo smolofis-admin timezone Asia/Ho_Chi_Minh" >/dev/null || die "could not set the time zone"
 if guest "$FINAL_PASSWORD" "sudo smolofis-admin timezone Nowhere/Invalid" >/dev/null 2>&1; then
