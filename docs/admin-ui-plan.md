@@ -8,15 +8,13 @@ computer sign-in is deferred.
 Update this file with evidence as work completes. A checked milestone means
 its acceptance criteria have passed, not merely that code exists.
 
-## M0 — Identity feasibility gate
-
 ## R0 — Nightly rollout with administration disabled
 
 - [ ] Review and commit the implementation on current main, preserving disabled console/authentication defaults and excluding candidate service units from image installation.
 - [ ] Pass CI lint/advisory/unit tests, ISO boot/install checks, and upgrade from the previous published nightly.
 - [ ] Publish the signed nightly and record its exact commit/version.
 - [x] Inspect 192.168.1.17: 0.1.0-dev.68, system-a active, release signers present, recent backups, ample free space, healthy core containers; administration flags absent.
-- [ ] Resolve or document the pre-existing user@1000.service failure before rollout.
+- [x] Diagnose pre-existing user@1000.service failure: missing libpam-systemd. Candidate adds the package and an installed-user-session acceptance check; CI and server verification remain required.
 - [ ] Stage the signed nightly through the existing updater with a fresh backup, then reboot and verify version, active slot, data/services, and administration still disabled.
 
 R0 permits code delivery with features disabled; it does not authorize enabling

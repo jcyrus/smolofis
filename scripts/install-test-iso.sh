@@ -562,6 +562,9 @@ log "PASS  the appliance cannot suspend"
 guest "$FINAL_PASSWORD" "systemctl is-active getty@tty1.service" >/dev/null \
   || die "the installed system has no console login"
 log "PASS  the installed system has a console login"
+guest "$FINAL_PASSWORD" "test -n \"\$XDG_RUNTIME_DIR\" && systemctl is-active user@1000.service" >/dev/null \
+  || die "the installed system has no working PAM/systemd user session"
+log "PASS  the installed system has a working PAM/systemd user session"
 
 guest "$FINAL_PASSWORD" "sudo smolofis-admin timezone Asia/Ho_Chi_Minh" >/dev/null || die "could not set the time zone"
 if guest "$FINAL_PASSWORD" "sudo smolofis-admin timezone Nowhere/Invalid" >/dev/null 2>&1; then
