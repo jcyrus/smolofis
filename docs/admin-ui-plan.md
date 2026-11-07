@@ -10,12 +10,22 @@ its acceptance criteria have passed, not merely that code exists.
 
 ## R0 — Nightly rollout with administration disabled
 
-- [ ] Review and commit the implementation on current main, preserving disabled console/authentication defaults and excluding candidate service units from image installation.
-- [ ] Pass CI lint/advisory/unit tests, ISO boot/install checks, and upgrade from the previous published nightly.
-- [ ] Publish the signed nightly and record its exact commit/version.
+- [x] Review and commit the implementation on current main, preserving disabled console/authentication defaults and excluding candidate service units from image installation. PR #21 merged as 27198a6.
+- [x] Pass CI lint/advisory/unit tests, ISO boot/install checks, and upgrade from the previous published nightly. Candidate run 42165212246 and main publication run 42167447823 passed.
+- [x] Publish signed nightly 0.1.0-dev.73 from commit 27198a61bebc31f12190207b20f5edeedea5db8e; ISO SHA256 d62362bcb949aeb6028c28bf73440da0b30e6c6a186d5ff5e85eb3d5779c377b.
 - [x] Inspect 192.168.1.17: 0.1.0-dev.68, system-a active, release signers present, recent backups, ample free space, healthy core containers; administration flags absent.
-- [x] Diagnose pre-existing user@1000.service failure: missing libpam-systemd. Candidate adds the package and an installed-user-session acceptance check; CI and server verification remain required.
-- [ ] Stage the signed nightly through the existing updater with a fresh backup, then reboot and verify version, active slot, data/services, and administration still disabled.
+- [x] Resolve pre-existing user@1000.service failure: libpam-systemd is installed after upgrade; the user manager is active with XDG_RUNTIME_DIR=/run/user/1000. CI and server checks passed.
+- [x] Stage signed dev.73 through the existing updater with fresh backup 20261107T081623Z, reboot, and verify version, active slot, services, and administration still disabled. Server 192.168.1.17 now boots and is active on system-b; system-a is retained.
+
+Rollout completed 2026-11-07. Main run 42167447823 published the signed image.
+The server verified the manifest signature and ISO checksum before staging.
+The update verifier exited successfully and promoted system-b after phase ready.
+Docker, Gitea, Coolify, database/Redis, proxy, and runner recovered; Coolify's
+persisted users table is accessible. No failed systemd units remain. Console,
+login, and console asset routes return 404; candidate worker/private-console
+units report not-found; no administration flags are configured. The fresh
+backup and previous system-a image remain available. This verifies the disabled
+feature rollout, not identity/share management acceptance or a backup restore.
 
 R0 permits code delivery with features disabled; it does not authorize enabling
 identity administration or replace M0/M1/M6 acceptance.
