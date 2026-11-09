@@ -193,3 +193,14 @@ working slot containing the candidate build. It does not prove that a previous
 release can understand schema-v2 enrollment. Older-reader compatibility and
 upgrade/rollback deployment policy remain release gates; preserve schema-v2
 state/history instead of rewriting it to appease an older binary.
+
+
+The first complete CI attempt, run 42577895520 on PR #22, passed compilation,
+ISO assembly and smoke tests but both install jobs stopped before fixture
+preparation because the helper accepted only the `qemu` virtualization label.
+The CI guest uses KVM acceleration, which systemd can report as `kvm`. The
+helper now accepts both labels and reports unsupported detected values. Four
+native component checks passed, including simulated `qemu`/`kvm` acceptance and
+`vmware` refusal, fixture preservation, and changed-state detection. Evidence:
+`/var/lib/smolofis-identity-machine-lab/audit-workflow-17e925debf/`.
+Full signed A/B and rollback execution remains pending the corrected CI run.

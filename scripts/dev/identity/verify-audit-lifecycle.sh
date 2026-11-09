@@ -3,7 +3,11 @@
 # Synthetic enrollment stays locked and has no directory configuration.
 set -euo pipefail
 [[ ${EUID} -eq 0 ]] || { echo 'root required' >&2; exit 1; }
-[[ "$(systemd-detect-virt --vm)" == qemu ]] || { echo 'QEMU test guest required' >&2; exit 1; }
+virtualization="$(systemd-detect-virt --vm || true)"
+case "$virtualization" in
+    qemu|kvm) ;;
+    *) echo "QEMU/KVM test guest required (detected: ${virtualization:-unknown})" >&2; exit 1 ;;
+esac
 readonly BASE=/var/lib/smolofis/local-audit
 readonly STATE=/etc/smolofis/panel-enrollment.json
 readonly EVIDENCE=/var/lib/smolofis/ci-audit-lifecycle

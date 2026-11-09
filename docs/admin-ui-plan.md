@@ -84,6 +84,7 @@ See [prototype protocol](identity-prototype.md).
 - [x] Archival sync-failure and abrupt-VM recovery: inject EIO into all five Linux fsync calls; terminate the owned QEMU container after rename but before parent-directory fsync and verify the synced archive, valid live log, and changed boot ID after restart (2026-11-09). This does not simulate host/device cache power loss.
 - [x] Add packaged root `console-audit-init` and `console-audit-archive` workflow: non-destructive initialization, automatic standard-log selection, safe override handling, missing-log enrollment refusal and lockdown recovery. Seven native packaged-wrapper checks and nine local audit regressions passed; 69 host tests, Clippy and ShellCheck passed (2026-11-09). Existing image packaging includes the wrapper/binary without enabling services.
 - [x] Wire audit/enrollment persistence assertions into the existing signed A/B ISO install test after update promotion and corrupted-slot fallback, including administration-disabled checks. Three native fixture component checks passed; complete ISO execution is still pending (2026-11-09).
+- [x] Open draft [PR #22](https://github.com/jcyrus/smolofis/pull/22) on isolated branch `admin/audit-lifecycle-validation` and start full [CI run 42577895520](https://github.com/jcyrus/smolofis/actions/runs/42577895520). Initial run passed compilation, ISO assembly and smoke tests; BIOS/UEFI install jobs stopped at an overly narrow QEMU-only fixture guard. The helper now accepts QEMU/KVM with unsupported-VM refusal covered by four native component checks; full rerun, publication and server upgrade remain pending.
 - [ ] Validate the archival workflow in a signed nightly image and upgrade/rollback path before release; assess physical storage power-loss durability before claiming hardware-level guarantees.
 - [x] Local operation receipts/correlation: schema-v2 state atomically records the latest applied operation ID; audit authorization/completion/uncertainty are correlated. Host regressions, native completion-write process crash, legacy-v1 read, and real VM-reboot receipt recovery passed (2026-11-09). Known-ID history lookup is recorded above; general operation journaling and appliance upgrade/rollback integration remain pending. See [operation receipts](admin-operations.md).
 - [x] Audit crash-tail hardening: preserve incomplete records and refuse new appends; sign-in issues no session/cookie on tail/capacity failure. Four-process append and write-error regressions pass on macOS (2026-11-09). Complete operation/recovery auditing and real HTTPS/Serve acceptance remain pending.
@@ -287,3 +288,9 @@ failures and never log credentials.
   HTTP login denial without cookie/session issuance at audit capacity. Clippy
   with warnings denied, formatting and whitespace checks pass. The complete
   durable-auditing milestone remains open; this step covers authentication only.
+
+
+- Live production status rechecked after starting image validation (2026-11-09):
+  `192.168.1.17` reports dev.73, `smolofis-panel` active, and `/console` HTTP 404.
+  No `SMOLOFIS_CONSOLE_ENABLED` service environment entry was present.
+  Administration remains disabled; no production configuration was changed.

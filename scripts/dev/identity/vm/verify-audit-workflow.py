@@ -44,6 +44,20 @@ if sys.argv[1:] == ['--inside-lifecycle']:
     helper = Path('/opt/smolofis-identity-lab/vm/verify-audit-lifecycle.sh')
     subprocess.run(['bash', str(helper), 'prepare'], check=True, timeout=30)
     subprocess.run(['bash', str(helper), 'verify'], check=True, timeout=30)
+    # CI has /dev/kvm; systemd reports kvm instead of qemu there. Exercise
+    # both supported detector results and an unsupported result explicitly.
+    detector = evidence / 'detector'
+    detector.mkdir(mode=0o700)
+    shim = detector / 'systemd-detect-virt'
+    environment = dict(os.environ, PATH=str(detector) + ':' + os.environ['PATH'])
+    for virtualization in ('qemu', 'kvm', 'vmware'):
+        shim.write_text('#!/bin/sh\nprintf "%s\\n" "' + virtualization + '"\n')
+        shim.chmod(0o700)
+        result = subprocess.run(['bash', str(helper), 'verify'], env=environment,
+                                capture_output=True, timeout=30)
+        assert (result.returncode == 0) == (virtualization != 'vmware'), result.stderr
+        if virtualization == 'vmware':
+            assert b'QEMU/KVM test guest required (detected: vmware)' in result.stderr
     state_path = Path('/etc/smolofis/panel-enrollment.json')
     before = state_path.read_bytes()
     assert subprocess.run(['bash', str(helper), 'prepare'], capture_output=True).returncode != 0
@@ -53,13 +67,14 @@ if sys.argv[1:] == ['--inside-lifecycle']:
     state_path.write_bytes(before)
     subprocess.run(['bash', str(helper), 'verify'], check=True, timeout=30)
     report = {'checks': ['prepare and verify locked schema-v2 fixture',
+                         'QEMU and KVM detector acceptance with unsupported VM refusal',
                          'refuse fixture overwrite', 'detect changed state bytes'],
               'binary_sha256': hashlib.file_digest(BINARY.open('rb'), 'sha256').hexdigest(),
               'helper_sha256': hashlib.file_digest(helper.open('rb'), 'sha256').hexdigest(),
               'private_mount_namespace': True, 'actual_ab_boot_tested': False,
               'production_modified': False}
     (evidence / 'report.json').write_text(json.dumps(report, indent=2))
-    print('PASS: three lifecycle gate component checks; evidence retained at ' + str(evidence), flush=True)
+    print('PASS: four lifecycle gate component checks; evidence retained at ' + str(evidence), flush=True)
     raise SystemExit(0)
 previous_path = max(ROOT.glob('local-audit-*/report.json'), key=lambda p: p.stat().st_mtime)
 previous = json.loads(previous_path.read_text())
