@@ -117,7 +117,7 @@ else
 
   SCRATCH_DISK="${WORK}/persistence.raw"
   PERSIST_DIR="${WORK}/persist_root"
-  if command -v qemu-img >/dev/null 2>&1 && command -v mkfs.ext4 >/dev/null 2>&1; then
+  if command -v qemu-img >/dev/null 2>&1 && command -v mkfs.ext4 >/dev/null 2>&1 && command -v debugfs >/dev/null 2>&1; then
     log "creating 10GB persistent storage disk for smoke test..."
     mkdir -p "${PERSIST_DIR}/var/lib/docker" \
              "${PERSIST_DIR}/var/lib/containerd" \
@@ -129,11 +129,22 @@ else
 
     cp "$(dirname "${BASH_SOURCE[0]}")/../config/system/persistence.conf" "${PERSIST_DIR}/persistence.conf"
     qemu-img create -f raw "${SCRATCH_DISK}" 10G >/dev/null
-    mkfs.ext4 -F -q -L "persistence" -d "${PERSIST_DIR}" "${SCRATCH_DISK}"
+    mkfs.ext4 -F -q -L "persistence" -E root_owner=0:0 -d "${PERSIST_DIR}" "${SCRATCH_DISK}"
+    # mkfs -d preserves the runner UID of source files. Model the real root
+    # installer without requiring sudo or changing workstation ownership.
+    ownership="${WORK}/root-ownership.debugfs"
+    for path in /var /var/lib /var/lib/docker /var/lib/containerd /var/lib/smolofis /var/lib/tailscale /etc /etc/smolofis /home /persistence.conf; do
+      printf 'set_inode_field %s uid 0\nset_inode_field %s gid 0\n' "$path" "$path"
+    done > "$ownership"
+    debugfs -w -f "$ownership" "${SCRATCH_DISK}" >/dev/null 2>&1
+    for path in /var /var/lib /var/lib/docker /var/lib/containerd /var/lib/smolofis /var/lib/tailscale /etc /etc/smolofis /home /persistence.conf; do
+      debugfs -R "stat $path" "${SCRATCH_DISK}" 2>/dev/null | grep -Eq 'User: +0 +Group: +0' \
+        || die "scratch persistence path is not root-owned: $path"
+    done
     EXTRA_QEMU_ARGS+=(-drive "file=${SCRATCH_DISK},format=raw,if=virtio")
     CMDLINE="${CMDLINE} persistence"
   else
-    warn "qemu-img or mkfs.ext4 missing; running without persistent scratch drive"
+    warn "qemu-img, mkfs.ext4 or debugfs missing; running without persistent scratch drive"
   fi
 fi
 

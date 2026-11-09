@@ -145,6 +145,7 @@ def main():
             (Path(__file__).with_name('verify-machine-id.py'), 'verify-machine-id.py'),
             (REPO / 'config/initramfs/smolofis-machine-id', 'smolofis-machine-id'),
             (REPO / 'config/initramfs/smolofis-machine-id-tools', 'smolofis-machine-id-tools'),
+            (REPO / 'scripts/smoke-test-iso.sh', 'smoke-test-iso.sh'),
         ):
             with source.open('rb') as stream:
                 run(ssh_args()+[f'sudo -n tee /opt/smolofis-identity-lab/vm/{name} >/dev/null'], stdin=stream)

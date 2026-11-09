@@ -115,6 +115,28 @@ assert 'scripts/init-bottom/smolofis-machine-id' in contents
 for tool in ('stat', 'cat', 'tr', 'mktemp', 'sync', 'mv', 'mkdir', 'chmod'):
     assert any(path.endswith('/' + tool) for path in contents), tool
 passed('real Linux initramfs includes the early-boot script and every explicit tool dependency')
+# Reproduce mkfs -d copying the non-root runner UID into the smoke disk,
+# then run the smoke script's actual offline ownership normalization block.
+source_tree = directory / 'smoke-source'
+paths = ['var/lib/docker', 'var/lib/containerd', 'var/lib/smolofis', 'var/lib/tailscale', 'etc/smolofis', 'home']
+for path in paths:
+    (source_tree / path).mkdir(parents=True, exist_ok=True)
+(source_tree / 'persistence.conf').write_text('/etc/smolofis bind\n')
+for path in [source_tree, *source_tree.rglob('*')]:
+    os.chown(path, 65534, 65534)
+scratch = directory / 'smoke.raw'
+with scratch.open('wb') as stream:
+    stream.truncate(32 * 1024 * 1024)
+subprocess.run(['mkfs.ext4', '-F', '-q', '-E', 'root_owner=0:0', '-d', str(source_tree), str(scratch)], check=True)
+before = subprocess.check_output(['debugfs', '-R', 'stat /etc/smolofis', str(scratch)], stderr=subprocess.DEVNULL, text=True)
+assert '65534' in before
+smoke = SCRIPT.with_name('smoke-test-iso.sh').read_text()
+start = smoke.index('    # mkfs -d preserves')
+end = smoke.index('    EXTRA_QEMU_ARGS', start)
+block = 'set -euo pipefail\ndie() { echo "$*" >&2; exit 1; }\n' + smoke[start:end]
+subprocess.run(['bash', '-c', block], check=True,
+               env=dict(os.environ, WORK=str(directory), SCRATCH_DISK=str(scratch)), timeout=30)
+passed('smoke persistence image repairs and verifies copied runner ownership without host chown or sudo')
 report = {'checks': checks, 'script_sha256': hashlib.file_digest(SCRIPT.open('rb'), 'sha256').hexdigest(),
           'production_modified': False, 'actual_initramfs_boot_tested': False}
 (directory / 'report.json').write_text(json.dumps(report, indent=2))

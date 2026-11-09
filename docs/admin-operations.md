@@ -214,3 +214,15 @@ initramfs step now restores durable device identity before systemd starts;
 constraints. The lifecycle gate now checks both runtime and saved machine-ID
 bytes as well as enrollment/audit history. Full BIOS/UEFI acceptance remains
 pending the corrected image run.
+
+
+Run 42585992507 passed both complete BIOS and UEFI install jobs, including
+signed A/B promotion and corrupted-slot fallback, with unchanged enrollment,
+runtime/saved machine ID and audit files; administration stayed disabled.
+Its standalone smoke job refused a test persistence directory copied with the
+runner UID by `mkfs.ext4 -d`. The scratch-image builder now normalizes and
+verifies the required inode owners offline using debugfs, without host chown or
+sudo. The boot ownership guard remains strict. Nine native checks passed,
+including reproduction and repair of non-root copied inode ownership:
+`/var/lib/smolofis-identity-machine-lab/machine-id-4ae1dc0101/`.
+All-green CI remains pending the smoke fixture correction.
