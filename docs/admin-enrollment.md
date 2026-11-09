@@ -197,3 +197,25 @@ guest's loopback port, and refuses a non-x86_64 ELF artifact. The test itself
 requires the owned full-kernel VM markers and refuses an installed appliance
 or container. Production wiring, service sandbox behavior, archive retention,
 and a complete correlated operation journal remain pending.
+
+
+## Machine ID on the live-root appliance
+
+The installed appliance has a volatile root overlay. Early initramfs
+`init-bottom` now initializes or restores a root-owned ID from
+`/etc/smolofis/identity/machine-id` only when `/etc/smolofis` is a persistence
+mount, and writes a regular `/etc/machine-id` before PID 1 starts. The image
+builder includes the script and its tools and regenerates the initramfs.
+Nonpersistent Live USB boots retain normal systemd initialization. No single ID
+is embedded in the public image. This ordering avoids changing an ID after
+systemd or D-Bus has already cached it; see [systemd machine-id](https://www.freedesktop.org/software/systemd/man/247/machine-id.html).
+
+The boot step refuses corrupt, all-zero, oversized, symlinked, hard-linked,
+wrong-owner, or writable saved identity paths instead of silently replacing
+saved identity. Local enrollment still verifies its original machine binding.
+The saved ID is covered by the existing `/etc/smolofis` backup. Restoring it is
+part of restoring the device identity; do not copy it between independent
+appliances. Old preview enrollments created without durable machine-ID storage
+can require local verified re-enrollment after adoption. Their state and audit
+history must be preserved; the implementation does not rewrite existing
+receipt bindings to accept an unrelated machine ID.

@@ -139,6 +139,16 @@ def main():
     elif action == 'restored-ssh':
         PORT = '12223'
         run(ssh_args() + sys.argv[2:])
+    elif action == 'check-machine-id':
+        PORT = '12223'
+        for source, name in (
+            (Path(__file__).with_name('verify-machine-id.py'), 'verify-machine-id.py'),
+            (REPO / 'config/initramfs/smolofis-machine-id', 'smolofis-machine-id'),
+            (REPO / 'config/initramfs/smolofis-machine-id-tools', 'smolofis-machine-id-tools'),
+        ):
+            with source.open('rb') as stream:
+                run(ssh_args()+[f'sudo -n tee /opt/smolofis-identity-lab/vm/{name} >/dev/null'], stdin=stream)
+        run(ssh_args()+['sudo -n python3 /opt/smolofis-identity-lab/vm/verify-machine-id.py'])
     elif action == 'check-audit-lifecycle-gate':
         PORT = '12223'
         for source, name in (
@@ -264,7 +274,7 @@ def main():
     elif action == 'status':
         run(['docker','ps','--all','--filter',f'name=^/{NAME}$','--format','{{.Names}} {{.Status}} {{.Ports}}'])
     else:
-        raise SystemExit('usage: lab.py up|status|ssh <command>|provision|services|check-services|check-local-audit|check-web-audit|check-service-sandbox|check-operation-receipts|check-operation-history|check-audit-archive|check-archive-sync|check-audit-workflow|check-audit-lifecycle-gate|stop|restore|restored-ssh <command>')
+        raise SystemExit('usage: lab.py up|status|ssh <command>|provision|services|check-services|check-local-audit|check-web-audit|check-service-sandbox|check-operation-receipts|check-operation-history|check-audit-archive|check-archive-sync|check-audit-workflow|check-audit-lifecycle-gate|check-machine-id|stop|restore|restored-ssh <command>')
 
 if __name__ == '__main__':
     main()

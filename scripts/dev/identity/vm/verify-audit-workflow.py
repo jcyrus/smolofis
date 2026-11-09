@@ -41,6 +41,11 @@ os.umask(0o077)
 evidence = ROOT / ('audit-workflow-' + secrets.token_hex(5))
 evidence.mkdir(mode=0o700)
 if sys.argv[1:] == ['--inside-lifecycle']:
+    # The real image restores this in init-bottom; this namespace fixture
+    # supplies the current ID without modifying the guest's live machine ID.
+    identity = Path('/etc/smolofis/identity')
+    identity.mkdir(mode=0o700)
+    shutil.copyfile('/etc/machine-id', identity / 'machine-id')
     helper = Path('/opt/smolofis-identity-lab/vm/verify-audit-lifecycle.sh')
     subprocess.run(['bash', str(helper), 'prepare'], check=True, timeout=30)
     subprocess.run(['bash', str(helper), 'verify'], check=True, timeout=30)

@@ -204,3 +204,13 @@ native component checks passed, including simulated `qemu`/`kvm` acceptance and
 `vmware` refusal, fixture preservation, and changed-state detection. Evidence:
 `/var/lib/smolofis-identity-machine-lab/audit-workflow-17e925debf/`.
 Full signed A/B and rollback execution remains pending the corrected CI run.
+
+
+The second CI attempt (42582007436) passed the KVM guard, prepared the fixture,
+and promoted the signed update. It then correctly rejected enrollment because
+the volatile root supplied a different `/etc/machine-id` after reboot. An early
+initramfs step now restores durable device identity before systemd starts;
+[enrollment identity notes](admin-enrollment.md) cover migration and safety
+constraints. The lifecycle gate now checks both runtime and saved machine-ID
+bytes as well as enrollment/audit history. Full BIOS/UEFI acceptance remains
+pending the corrected image run.

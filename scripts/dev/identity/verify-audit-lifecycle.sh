@@ -58,7 +58,7 @@ case "${1:-}" in
         [[ "$digest" == "$(sha256sum "$archive" | cut -d' ' -f1)" ]]
         printf '%s\n' "$archive" > "$EVIDENCE/archive-path"
         printf '%s\n' "$operation" > "$EVIDENCE/operation-id"
-        sha256sum "$STATE" "$BASE/events.jsonl" "$archive" "$manifest" > "$EVIDENCE/hashes"
+        sha256sum /etc/machine-id /etc/smolofis/identity/machine-id "$STATE" "$BASE/events.jsonl" "$archive" "$manifest" > "$EVIDENCE/hashes"
         verify
         ;;
     verify) verify ;;
