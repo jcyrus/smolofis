@@ -12,9 +12,11 @@
 #   sudo smolofis-admin timezone Asia/Ho_Chi_Minh   # scheduled jobs follow this
 #   systemd-ask-password 'Office admin password:' | sudo smolofis-admin console-enroll username
 #   sudo smolofis-admin console-status|console-lock
+#   sudo smolofis-admin console-audit-init|console-audit-archive
 
 set -euo pipefail
 
+readonly LOCAL_AUDIT_BASE="/var/lib/smolofis/local-audit"
 readonly ADMIN_ENV="/etc/smolofis/admin.env"
 readonly ADMIN_USER="smolofis"
 readonly ADMIN_EMAIL="admin@smolofis.local"
@@ -146,7 +148,26 @@ prune_old_images() {
     cp "${shipped}" "${record}"
 }
 
+# The presence of the explicitly provisioned directory opts root recovery into
+# auditing. Keep selecting the path if its file disappears, so enrollment fails
+# closed. Explicit root environment overrides remain supported for diagnostics.
+select_local_audit() {
+    if [[ -z "${SMOLOFIS_LOCAL_AUDIT_FILE+x}" && ( -e "${LOCAL_AUDIT_BASE}" || -L "${LOCAL_AUDIT_BASE}" ) ]]; then
+        export SMOLOFIS_LOCAL_AUDIT_FILE="${LOCAL_AUDIT_BASE}/events.jsonl"
+    fi
+}
+
 case "${1:-}" in
+    console-audit-init|console-audit-archive)
+        [[ $# -eq 1 ]] || die "this command takes no additional arguments"
+        if [[ -n "${SMOLOFIS_LOCAL_AUDIT_FILE+x}" && "${SMOLOFIS_LOCAL_AUDIT_FILE}" != "${LOCAL_AUDIT_BASE}/events.jsonl" ]]; then
+            die "audit maintenance uses the standard local log; unset SMOLOFIS_LOCAL_AUDIT_FILE or use the panel CLI for a custom path"
+        fi
+        if [[ "$1" == console-audit-init ]]; then
+            exec /usr/local/bin/smolofis-panel --auth-audit-init "${LOCAL_AUDIT_BASE}"
+        fi
+        exec /usr/local/bin/smolofis-panel --auth-audit-archive "${LOCAL_AUDIT_BASE}/events.jsonl" "${LOCAL_AUDIT_BASE}/archives"
+        ;;
     console-access-check)
         [[ $# -eq 1 ]] || die "this command takes no additional arguments"
         exec /usr/local/bin/smolofis-panel --console-access-check \
@@ -154,11 +175,18 @@ case "${1:-}" in
         ;;
     console-enroll)
         [[ $# -eq 2 ]] || die "usage: smolofis-admin console-enroll username (password on stdin)"
+        select_local_audit
         exec /usr/local/bin/smolofis-panel --auth-enroll \
             /etc/smolofis/panel-auth.json /etc/smolofis/panel-enrollment.json "$2"
         ;;
+    console-operation-status)
+        [[ $# -eq 2 ]] || die "usage: smolofis-admin console-operation-status operation-id"
+        select_local_audit
+        exec /usr/local/bin/smolofis-panel --auth-operation-status /etc/smolofis/panel-enrollment.json "$2"
+        ;;
     console-status|console-lock)
         [[ $# -eq 1 ]] || die "this command takes no additional arguments"
+        select_local_audit
         exec /usr/local/bin/smolofis-panel "--auth-${1#console-}" /etc/smolofis/panel-enrollment.json
         ;;
     provision)
@@ -190,7 +218,7 @@ case "${1:-}" in
         log "time zone is ${zone}; nightly backups now run around 03:00 local time"
         ;;
     *)
-        echo "usage: smolofis-admin provision|show|timezone <zone>|console-enroll <username>|console-status|console-lock|console-access-check" >&2
+        echo "usage: smolofis-admin provision|show|timezone <zone>|console-enroll <username>|console-status|console-lock|console-operation-status <operation-id>|console-access-check|console-audit-init|console-audit-archive" >&2
         exit 2
         ;;
 esac

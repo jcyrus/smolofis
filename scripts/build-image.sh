@@ -260,6 +260,15 @@ echo "${VERSION}" > "${ROOTFS}/etc/smolofis-release"
 # Each flashed device must generate its own machine-id on first boot.
 : > "${ROOTFS}/etc/machine-id"
 rm -f "${ROOTFS}/var/lib/dbus/machine-id"
+# live-boot mounts /etc/smolofis before init-bottom; restore the durable ID
+# before PID 1 and D-Bus cache it. A late service cannot safely change it.
+install -d -m 0755 "${ROOTFS}/etc/initramfs-tools/scripts/init-bottom" "${ROOTFS}/etc/initramfs-tools/hooks"
+install -m 0755 "${REPO_ROOT}/config/initramfs/smolofis-machine-id" \
+    "${ROOTFS}/etc/initramfs-tools/scripts/init-bottom/smolofis-machine-id"
+install -m 0755 "${REPO_ROOT}/config/initramfs/smolofis-machine-id-tools" \
+    "${ROOTFS}/etc/initramfs-tools/hooks/smolofis-machine-id-tools"
+run_in_chroot "update-initramfs -u -k all"
+
 
 # TTY login banner: ANSI-colored ASCII identity, no image assets. Raw SGR
 # bytes pass through agetty untouched; agetty expands its own escapes at
