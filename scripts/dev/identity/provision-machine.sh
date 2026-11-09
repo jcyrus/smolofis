@@ -7,6 +7,13 @@ if [[ "${SMOLOFIS_IDENTITY_MACHINE_LAB:-}" != 1 || "$EUID" != 0 ]]; then
     echo 'Run as root only in an isolated empty lab machine with SMOLOFIS_IDENTITY_MACHINE_LAB=1.' >&2
     exit 2
 fi
+if [[ -e /etc/smolofis-release || ! -f /etc/smolofis-m0-fullvm || -e /run/systemd/container ]] \
+    || ! systemd-detect-virt --vm >/dev/null; then
+    echo 'Refusing provisioning outside a marked full-kernel VM lab or on an appliance.' >&2
+    exit 2
+fi
+[[ -f /var/lib/m0-bootstrap-ready ]] && systemctl is-active --quiet nftables \
+    || { echo 'Lab bootstrap and network isolation must finish first.' >&2; exit 2; }
 # shellcheck source=/dev/null
 source /etc/os-release
 if [[ "$ID" != debian || "$VERSION_ID" != 13 ]]; then
@@ -26,7 +33,7 @@ touch "$LAB_ROOT/owned"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends samba-ad-dc samba-ad-provision \
-    samba-vfs-modules samba winbind smbclient ldap-utils acl openssl python3 bind9-dnsutils
+    samba-vfs-modules samba winbind smbclient ldap-utils acl openssl python3 bind9-dnsutils tdb-tools
 systemctl disable --now smbd.service nmbd.service winbind.service
 if [[ ! -f "$LAB_ROOT/passwords.json" ]]; then
     python3 - <<'PY'
@@ -39,12 +46,15 @@ PY
 fi
 password() { python3 -c 'import json,sys; print(json.load(open("/var/lib/smolofis-identity-machine-lab/passwords.json"))[sys.argv[1]])' "$1"; }
 if [[ ! -f /var/lib/samba/private/sam.ldb ]]; then
-    read -r machine_ip _ < <(hostname -I)
+    machine_ip="$(ip -4 -o addr show dev lab0 | awk '{print $4}' | cut -d/ -f1)"
+    [[ "$machine_ip" == 172.31.83.10 ]] || { echo 'Unexpected isolated directory interface.' >&2; exit 2; }
     : > /etc/samba/smb.conf
     samba-tool domain provision --realm=M0.SMOLOFIS.TEST --domain=M0 \
         --host-name=dc-m0 --host-ip="$machine_ip" --server-role=dc \
         --dns-backend=SAMBA_INTERNAL --use-rfc2307 \
         --option="interfaces=lo ${machine_ip}/32" --option='bind interfaces only=yes' \
+        --option='old password allowed period=0' \
+        --option='dns forwarder=10.0.2.3' \
         --adminpass="$(password Administrator)" > "$LAB_ROOT/provision.log" 2>&1
     samba-tool user create alice "$(password alice)" \
         --mail-address=alice@m0.smolofis.test >/dev/null
@@ -65,5 +75,8 @@ if [[ ! -f "$LAB_ROOT/tls-ready" ]]; then
     touch "$LAB_ROOT/tls-ready"
 fi
 systemctl unmask samba-ad-dc.service
+install -d -m 0755 /etc/systemd/resolved.conf.d
+printf '[Resolve]\nDNS=172.31.83.10\nDomains=~m0.smolofis.test\n' > /etc/systemd/resolved.conf.d/m0-directory.conf
+systemctl restart systemd-resolved
 systemctl enable --now samba-ad-dc.service
 python3 /opt/smolofis-identity-lab/verify-machine.py snapshot

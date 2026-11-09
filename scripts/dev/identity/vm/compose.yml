@@ -1,0 +1,49 @@
+# Runs only inside the owned full VM. The DC is the guest's native Samba service.
+name: smolofis-m0-native
+services:
+  files:
+    image: smolofis-m0-member:local
+    build:
+      context: .
+      dockerfile: Member.Dockerfile
+      # Host means the isolated guest, not the workstation. Avoid Docker's
+      # default build bridge, which the guest firewall intentionally blocks.
+      network: host
+    hostname: files-m0
+    domainname: m0.smolofis.test
+    restart: unless-stopped
+    networks: [lab]
+    extra_hosts: ["dc-m0.m0.smolofis.test:172.31.83.10"]
+    dns: [172.31.83.10]
+    volumes:
+      - /var/lib/smolofis-identity-machine-lab:/lab:ro
+      - member:/var/lib/samba
+      - member-config:/etc/samba
+      - shares:/srv/shares
+    ports: ["127.0.0.1:1445:445"]
+  gitea:
+    image: gitea/gitea:28.2.0
+    hostname: git-m0
+    restart: unless-stopped
+    networks: [lab]
+    extra_hosts: ["dc-m0.m0.smolofis.test:172.31.83.10"]
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__service__DISABLE_REGISTRATION: "true"
+      GITEA__session__PROVIDER: memory
+      GITEA__security__LOGIN_REMEMBER_DAYS: "0"
+    ports: ["127.0.0.1:3000:3000", "127.0.0.1:2223:22"]
+    volumes:
+      - git:/data
+networks:
+  lab:
+    ipam:
+      config: [{subnet: 10.85.0.0/24}]
+volumes:
+  member:
+  member-config:
+  shares:
+  git:

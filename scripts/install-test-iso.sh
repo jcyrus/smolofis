@@ -565,15 +565,19 @@ log "PASS  the installed system has a console login"
 guest "$FINAL_PASSWORD" "test -n \"\$XDG_RUNTIME_DIR\" && systemctl is-active user@1000.service" >/dev/null \
   || die "the installed system has no working PAM/systemd user session"
 log "PASS  the installed system has a working PAM/systemd user session"
-for preview_path in /console /auth/login /assets/console.css /assets/console.js; do
-  [[ "$(guest "$FINAL_PASSWORD" "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8090${preview_path}")" == 404 ]] \
-    || die "administration preview unexpectedly exposed: ${preview_path}"
-done
-guest "$FINAL_PASSWORD" "test ! -e /etc/systemd/system/smolofis-admin-worker.service && \
-  test ! -e /etc/systemd/system/smolofis-console-preview.service && \
-  test ! -e /etc/systemd/system/smolofis-console-https-preview.service" \
-  || die "administration candidate units unexpectedly installed"
-log "PASS  administration previews remain disabled in the installed image"
+assert_administration_disabled() {
+  local preview_path
+  for preview_path in /console /auth/login /assets/console.css /assets/console.js; do
+    [[ "$(guest "$FINAL_PASSWORD" "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8090${preview_path}")" == 404 ]] \
+      || die "administration preview unexpectedly exposed: ${preview_path}"
+  done
+  guest "$FINAL_PASSWORD" "test ! -e /etc/systemd/system/smolofis-admin-worker.service && \
+    test ! -e /etc/systemd/system/smolofis-console-preview.service && \
+    test ! -e /etc/systemd/system/smolofis-console-https-preview.service" \
+    || die "administration candidate units unexpectedly installed"
+  log "PASS  administration previews remain disabled in the installed image"
+}
+assert_administration_disabled
 
 guest "$FINAL_PASSWORD" "sudo smolofis-admin timezone Asia/Ho_Chi_Minh" >/dev/null || die "could not set the time zone"
 if guest "$FINAL_PASSWORD" "sudo smolofis-admin timezone Nowhere/Invalid" >/dev/null 2>&1; then
@@ -615,6 +619,13 @@ guest "$FINAL_PASSWORD" "docker exec app-data-test cat /data/value" | grep -qx k
 guest "$FINAL_PASSWORD" "docker rm -f app-data-test && docker volume rm app-data-test" >/dev/null
 wait_ready "after restoring app data"
 log "PASS  backup and restore cover deployed apps' data"
+
+# A locked synthetic enrollment exercises persistent schema-v2 receipts and
+# archived history without configuring directory access or enabling the console.
+guest "$FINAL_PASSWORD" "sudo bash -s prepare" \
+  < "$(dirname "$0")/dev/identity/verify-audit-lifecycle.sh" \
+  || die "could not prepare audit lifecycle fixture"
+log "PASS  locked audit lifecycle fixture prepared before signed update"
 
 BUNDLE="${WORK}/bundle"
 mkdir -p "$BUNDLE"
@@ -660,6 +671,12 @@ until [[ "$(slot_status active)" == "system-b" ]]; do
   sleep 5
 done
 log "PASS  update booted and was promoted to the active slot"
+guest "$FINAL_PASSWORD" "sudo bash -s verify" \
+  < "$(dirname "$0")/dev/identity/verify-audit-lifecycle.sh" \
+  || die "audit history or enrollment changed across signed update"
+log "PASS  audit history and locked schema-v2 enrollment survive signed update"
+assert_administration_disabled
+
 
 guest "$FINAL_PASSWORD" "$APPLY" >/dev/null || die "second smolofis-update apply failed"
 guest "$FINAL_PASSWORD" "sudo mount -o remount,rw /run/live/medium && sudo truncate -s 4096 /run/live/medium/system-a/filesystem.squashfs && sync" \
@@ -675,6 +692,12 @@ log "PASS  a failed update rolled back to the previous slot"
 
 # Logged-in but still booting, so wait for the stack before judging its logs.
 wait_ready "after the rollback"
+guest "$FINAL_PASSWORD" "sudo bash -s verify" \
+  < "$(dirname "$0")/dev/identity/verify-audit-lifecycle.sh" \
+  || die "audit history or enrollment changed across rollback"
+log "PASS  audit history and locked schema-v2 enrollment survive rollback"
+assert_administration_disabled
+
 support_rc=0
 support_output="$(guest "$FINAL_PASSWORD" "sudo smolofis-support" 2>&1)" || support_rc=$?
 bundle="$(tail -n 1 <<<"$support_output")"

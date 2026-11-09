@@ -707,43 +707,58 @@ mod tests {
     #[tokio::test]
     async fn audit_failure_prevents_session_issuance() {
         use std::fs::OpenOptions;
-        let path =
-            std::env::temp_dir().join(format!("smolofis-auth-audit-{}", rand::random::<u64>()));
-        let file = OpenOptions::new()
-            .create_new(true)
-            .read(true)
-            .append(true)
-            .open(&path)
+        for partial_tail in [false, true] {
+            let path =
+                std::env::temp_dir().join(format!("smolofis-auth-audit-{}", rand::random::<u64>()));
+            let file = OpenOptions::new()
+                .create_new(true)
+                .read(true)
+                .append(true)
+                .open(&path)
+                .unwrap();
+            if partial_tail {
+                std::fs::write(&path, b"{\"version\":1").unwrap();
+            } else {
+                use std::os::unix::fs::FileExt;
+                file.set_len(16 * 1024 * 1024).unwrap();
+                OpenOptions::new()
+                    .write(true)
+                    .open(&path)
+                    .unwrap()
+                    .write_at(b"\n", 16 * 1024 * 1024 - 1)
+                    .unwrap();
+            }
+            let original_length = std::fs::metadata(&path).unwrap().len();
+            let mut auth = Auth::new(
+                "http://127.0.0.1:8090".into(),
+                Arc::new(FakeDirectory(AtomicU8::new(1))),
+            )
             .unwrap();
-        file.set_len(16 * 1024 * 1024).unwrap();
-        let mut auth = Auth::new(
-            "http://127.0.0.1:8090".into(),
-            Arc::new(FakeDirectory(AtomicU8::new(1))),
-        )
-        .unwrap();
-        auth.audit = Some(crate::audit::Audit::from_test_file(file));
-        let auth = Arc::new(auth);
-        let csrf = "a".repeat(64);
-        let mut headers = HeaderMap::new();
-        headers.insert(header::ORIGIN, "http://127.0.0.1:8090".parse().unwrap());
-        headers.insert(
-            header::COOKIE,
-            format!("{LOGIN_COOKIE}={csrf}").parse().unwrap(),
-        );
-        let response = login(
-            Extension(auth.clone()),
-            headers,
-            Form(Login {
-                username: "admin".into(),
-                password: "correct".into(),
-                csrf,
-            }),
-        )
-        .await;
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert!(response.headers().get(header::SET_COOKIE).is_none());
-        assert!(auth.store.lock().unwrap().sessions.is_empty());
-        std::fs::remove_file(path).unwrap();
+            auth.audit = Some(crate::audit::Audit::from_test_file(file));
+            let auth = Arc::new(auth);
+            let csrf = "a".repeat(64);
+            let mut headers = HeaderMap::new();
+            headers.insert(header::ORIGIN, "http://127.0.0.1:8090".parse().unwrap());
+            headers.insert(
+                header::COOKIE,
+                format!("{LOGIN_COOKIE}={csrf}").parse().unwrap(),
+            );
+            let response = login(
+                Extension(auth.clone()),
+                headers,
+                Form(Login {
+                    username: "admin".into(),
+                    password: "correct".into(),
+                    csrf,
+                }),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert!(response.headers().get(header::SET_COOKIE).is_none());
+            assert!(auth.store.lock().unwrap().sessions.is_empty());
+            assert_eq!(std::fs::metadata(&path).unwrap().len(), original_length);
+            std::fs::remove_file(path).unwrap();
+        }
     }
 
     #[tokio::test]

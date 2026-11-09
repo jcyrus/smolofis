@@ -8,6 +8,7 @@
 #[cfg(unix)]
 mod admin_worker;
 mod audit;
+mod audit_archive;
 mod auth;
 mod config;
 mod console;

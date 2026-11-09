@@ -102,6 +102,48 @@ refuses symlinks and foreign state rather than silently replacing them.
 
 ## Direct binary commands and testing
 
+Local audit preview is separately opt-in through `SMOLOFIS_LOCAL_AUDIT_FILE`.
+Use a dedicated, pre-existing root-owned 0600 file with one hard link under a
+trusted root-owned directory; do not share the panel-owned authentication log,
+enrollment state, or directory configuration file. For a new isolated lab log:
+
+```sh
+sudo install -d -o root -g root -m 0755 /var/lib/smolofis/local-audit
+sudo sh -c 'umask 077; set -C; : > /var/lib/smolofis/local-audit/events.jsonl'
+sudo env SMOLOFIS_LOCAL_AUDIT_FILE=/var/lib/smolofis/local-audit/events.jsonl \
+  smolofis-admin console-lock
+```
+
+The noclobber creation intentionally fails if the file already exists. Never
+truncate an existing log. Enrollment can use the same `sudo env` prefix after
+the protected password pipe. Setting the panel's `SMOLOFIS_AUDIT_FILE` does not
+enable local-command auditing, and the local variable does not configure the
+panel. Defaults remain unchanged when the local variable is absent.
+
+After verified administrator authentication, `local_enrollment_authorized` is
+synced before enrollment state changes. Failure recording that authorization
+prevents enrollment and leaves existing access/lock/generation intact. This is
+not a completed-operation claim. New [operation receipts](admin-operations.md)
+correlate authorization and completion with an independent ID and atomically
+persist the latest applied result in schema-v2 state. If completion logging
+fails after state commits, the command explicitly reports that partial result;
+inspect `console-status` rather than assuming an error means nothing changed.
+
+Lockdown persists the locked state and rotated generation first, then writes
+`local_console_locked`. An unavailable/full/broken audit log cannot prevent
+locking access. If recording fails after persistence, the command returns an
+explicit error saying the console is locked and the audit needs repair; use
+`console-status` to inspect it. Status does not require an audit log or directory.
+
+Local events include `actor_uid: 0`, identifying the root command process rather
+than a human behind sudo/SSH. Enrollment also includes the verified administrator
+GUID; lockdown does not attribute the root operator to that directory user.
+No username, password, path, session generation, or arbitrary error text enters
+the event. Unit tests alone do not establish Linux/root permission acceptance;
+full-VM evidence is recorded below. Known-ID historical lookup is now available
+through `console-operation-status`; see the operation guide. Denied-command
+auditing and a complete durable operation journal remain pending.
+
 The admin wrapper uses these fixed paths; the binary also accepts explicit
 absolute paths for isolated tests:
 
@@ -123,3 +165,35 @@ The isolated Docker test uses synthetic directory accounts, a unique container
 machine ID, root local commands, and an unprivileged panel process. It publishes
 no host ports. This proves preliminary behavior, not full VM, recovery-from-backup,
 native client, production deployment, or durable auditing acceptance.
+
+Full-VM local-audit acceptance passed on 2026-11-09 with the static x86_64
+Linux binary and isolated Debian 13 guest, including real LDAPS verification.
+Nine checks cover denied non-admin/wrong credentials, root/GUID attribution,
+UID 65534 command rejection, generation rotation, incomplete-tail handling,
+missing/wrong-owner/wrong-mode/symlink/hard-link audit files, protected-file
+alias rejection, real ENOSPC, and concurrent root writers. Lockdown remains
+available and status remains local throughout audit failures. A disposable
+64 KiB tmpfs was filled to produce ENOSPC and unmounted in `finally`; the
+guest root filesystem and office server were not filled by that fault.
+
+The private report and synthetic credentials are retained under
+`/var/lib/smolofis-identity-machine-lab/local-audit-3ecff7d1cd/` in the guest.
+The report records the binary SHA256, kernel, architecture, checks, runtime
+path, and tmpfs cleanup. Runtime fixtures under `/run` disappear at reboot;
+this is not appliance persistence or service sandbox acceptance.
+
+To reproduce, build from context `src-dashboard` with the test-only
+`scripts/dev/identity/vm/Panel.Dockerfile` using `--platform linux/amd64`.
+It uses locked Cargo dependencies; the accepted build used Rust 1.98.1.
+Extract `/smolofis-panel` from the stopped artifact image into ignored
+`work/identity-m0-vm/panel-audit`, then run:
+
+```sh
+python3 scripts/dev/identity/vm/lab.py check-local-audit
+```
+
+The runner stages only the reviewed binary/script, pins SSH to the restored
+guest's loopback port, and refuses a non-x86_64 ELF artifact. The test itself
+requires the owned full-kernel VM markers and refuses an installed appliance
+or container. Production wiring, service sandbox behavior, archive retention,
+and a complete correlated operation journal remain pending.

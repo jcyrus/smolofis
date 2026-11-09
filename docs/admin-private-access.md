@@ -6,6 +6,10 @@ install or enable the new units. Full VM, actual Tailscale certificate issuance,
 access policy, remote mobile, boot lifecycle, and security acceptance remain
 release gates. Durable actor-attributed auditing is also unfinished.
 
+Subsequent 2026-11-09 evidence covers actual backend/worker unit execution in
+the isolated full-kernel Debian VM; see sandbox acceptance below. It does not
+cover Tailscale Serve, real certificates, network policy, or phone access.
+
 ## Transport layout
 
 ```text
@@ -64,6 +68,21 @@ requires `/etc/smolofis/panel-auth.json` plus
 listener or turn off its authentication/enrollment requirements. Its origin
 must be HTTPS under the node's MagicDNS domain. The service runs as
 `smolofis-panel` and retains filesystem/capability hardening.
+
+The candidate now explicitly mounts `/run` read-only. A native probe observed
+its separate tmpfs writable in the lab namespace with `ProtectSystem=strict`
+alone; the explicit rule passed write-denial probes. The worker retains only
+its own runtime-directory exception. Private temporary directories remain
+writable by design. These settings do not claim protection against every
+later host mount propagation; see [systemd filesystem restrictions](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html).
+
+Audit writing is separately opt-in. After provisioning the trusted directory
+and panel-owned 0600 file in the [audit guide](admin-audit.md), review
+`config/systemd/smolofis-console-preview.service.d/audit.conf`. It selects
+the fixed audit file and grants only that file a `ReadWritePaths` exception.
+The unit and drop-in remain excluded from image installation. Missing files
+or unsafe permissions fail closed; do not make the whole persistent data tree
+writable to make auditing work.
 
 `config/systemd/smolofis-console-https-preview.service` depends on that backend
 and `tailscaled`. Its root preflight runs:
@@ -175,4 +194,47 @@ policy are involved. No TLS checks are disabled to make the fixture work.
 Real-node acceptance still needs certificate provisioning/renewal, correct
 Serve Host/Origin forwarding, foreground cleanup after stop/crash/reboot,
 allowed-admin/denied-employee policy tests, LAN bypass checks, phone sign-in,
-network outages, and actual systemd sandbox execution on the full target VM.
+network outages, and HTTPS/Serve unit sandbox execution on the full target VM.
+
+Actual backend/worker sandbox acceptance passed on 2026-11-09 using the
+isolated Debian VM and reviewed static Linux binary. Nine checks covered:
+
+- Fail-closed startup when the audit file lacked a write exception, despite
+  otherwise correct Unix ownership/permissions.
+- Actual candidate backend operation with the single-file audit drop-in,
+  real LDAPS login, Secure cookie attributes, and protected telemetry.
+- `ExecStartPost` probes under the unit's hardening: writes outside the
+  allowlist returned EROFS, a normally readable synthetic home file was
+  hidden, effective capabilities were zero, and no-new-privileges was active.
+- The actual main process ran with the panel UID and seccomp active. Hostile
+  environment overrides could not widen the listener or bypass enrollment;
+  the kernel listener remained only 127.0.0.1:8091.
+- Atomic local lockdown became visible to the running service; re-enrollment
+  did not revive the prior browser token. The test bound the configuration
+  directory, not individual file inodes, so atomic replacements stayed visible.
+- The root worker's Unix socket admitted the configured panel UID while
+  rejecting root and another UID even when Unix permissions allowed connection.
+- Unknown/arbitrary/unsupported/oversized/incomplete worker requests were
+  rejected. Mutation support remained false. A worker-context probe could
+  create Unix sockets and its runtime file but could not create an IPv4 socket.
+- Stopping the units removed the worker runtime/socket and backend listener.
+
+The actual unit files were loaded from temporary `/run/systemd/system` entries.
+Lab overrides changed the binary path, disabled automatic restart, bound private
+fixture configuration, supplied negative-test environment values, and added
+`ExecStartPost` probes; they did not remove hardening. A synthetic ts.net-shaped
+origin tested backend behavior using local proxy-style HTTP requests, not a
+real HTTPS connection or real tailnet identity. The HTTPS/Serve unit was not
+started. Unit entries, fixture configuration, and the temporary service account
+were cleaned up. No candidate unit was enabled or installed into an image.
+
+Private evidence is retained at
+`/var/lib/smolofis-identity-machine-lab/service-audit-592b57d646/`, including
+the systemd version, binary hash, event archives, journals, and declared lab
+overrides. Reproduce after preparing the [local audit fixture](admin-enrollment.md):
+
+```sh
+python3 scripts/dev/identity/vm/lab.py check-service-sandbox
+```
+
+Real tailnet/certificate/policy/mobile/Serve lifecycle acceptance remains open.

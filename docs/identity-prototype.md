@@ -130,13 +130,15 @@ realm and DNS configuration are explicit setup inputs; the appliance's current
 ## Separate native-service probe
 
 `scripts/dev/identity/provision-machine.sh` and `verify-machine.py` are for an
-**empty, isolated Debian 13 lab machine only**. They provision a separate
+**empty, isolated Debian 13 full-kernel lab VM only**. They provision a separate
 `M0.SMOLOFIS.TEST` realm, install Samba as a real systemd service, and would
 verify LDAPS, built-in SYSVOL read access, and stable GUID/SID values across
 service activations. They do not replace the separate domain-member share
 server tested by the container suite. The provisioner requires root and
 `SMOLOFIS_IDENTITY_MACHINE_LAB=1`, refuses unowned or partial domains, and
 expects both files under `/opt/smolofis-identity-lab/` in the lab machine.
+It also requires the owned VM marker, completed firewall bootstrap, and a
+full-VM virtualization check; an appliance installation is explicitly refused.
 
 Attempted on an isolated OrbStack Debian 13 amd64 machine named
 `smolofis-identity-m0`, with file integration disabled, network isolation,
@@ -147,6 +149,214 @@ check is counted as passing. The scripts deliberately do not apply the
 container-only `user.NTACL` workaround. A full-kernel VM is still required.
 The failed machine is retained for diagnostics; do not rerun provisioning on
 its partial directory. Use a fresh full VM for the next attempt.
+
+### Full-kernel VM evidence (2026-11-07)
+
+`scripts/dev/identity/vm/lab.py` runs QEMU inside an unprivileged Docker
+runner. The Debian guest has its own x86_64 kernel and ext4 root filesystem;
+Samba runs under the guest's systemd. This is distinct from the failed LXC
+probe above. Only loopback SSH port 12222 is published. Guest firewall rules
+block office/private-network egress while allowing public package downloads.
+The host SSH key is pinned and no SSH agent is forwarded. Production is untouched.
+
+The official Debian 13 genericcloud AMD64 image was checked against its
+official HTTPS SHA512SUMS file; its detached signature has not been verified.
+Image checksum evidence, VM disks, pinned SSH keys, seed, and console output
+are retained under ignored `work/identity-m0-vm/` with private permissions.
+Do not commit or publish that directory.
+
+Passed on the guest: Samba 4.22.11 native domain provision,
+certificate-verified LDAPS for the synthetic Alice account, built-in SYSVOL
+read, and a 320-byte native `security.NTACL` attribute. The guest reports
+`qemu`, x86_64, ext4, and no container runtime marker. The LDAP SRV query
+resolves the DC, time synchronization is reported active, and systemd reports
+no failed units. These are positive checks, not DNS/time failure acceptance.
+One Samba systemd restart also passed LDAPS, SYSVOL, and unchanged GUID/SID
+comparison after the SMB listener became ready. The initial immediate SYSVOL
+probe failed; the verifier now allows a bounded SMB readiness window.
+DNS update logs contain duplicate-record errors (exit 110); these remain
+an investigation item even though the positive SRV lookup works.
+The machine verifier stores GUID/SID and service invocation evidence in
+`/var/lib/smolofis-identity-machine-lab/baseline.json` inside the guest.
+
+After preparing the verified base image and building the runner with
+`docker build -t smolofis-m0-qemu:local scripts/dev/identity/vm`, use:
+
+```sh
+python3 scripts/dev/identity/vm/lab.py up
+# Wait for cloud-init and /var/lib/m0-bootstrap-ready in the guest.
+python3 scripts/dev/identity/vm/lab.py provision
+python3 scripts/dev/identity/vm/lab.py status
+python3 scripts/dev/identity/vm/lab.py stop
+```
+
+The adjacent Compose configuration now runs a separate domain-member file
+service and appliance-pinned Gitea 28.2.0 inside the guest. Gitea's trusted
+LDAPS login passes for Alice without administrator privileges. The member
+reports a healthy domain join. Guest `smbclient` checks pass: Alice lists and
+writes, Reader lists and downloads Alice's file but cannot write, and Outsider
+cannot list or write. Synthetic probe files are removed after the check.
+
+`lab.py services` stages the reviewed lab files, creates synthetic users and
+groups, installs Docker, and builds/starts the services. The member image
+build uses the isolated guest's network; Docker's default build bridge is
+blocked by the guest firewall. Runtime services use the dedicated 10.85.0.0/24
+bridge. Service ports bind only the guest's loopback. `lab.py check-services`
+configures Gitea's CA/auth source and executes the guest permission checks.
+For checks without configuration changes, run `configure-gitea.py --verify-only`
+and `verify-services.py` under `/opt/smolofis-identity-lab/vm/` as guest root.
+
+Full kernel reboot passed: `compare-reboot` verified a changed kernel boot ID
+and stable directory GUID/SID in a new service invocation. Gitea directory
+login and all guest share permission checks passed after automatic startup,
+without rerunning configuration or manually restarting the services.
+
+Native Windows permission checks and final
+topology acceptance remain open. Guest CLI checks do not replace native clients.
+
+Password-reset policy finding: the native DC defaults to a 60-minute
+`old password allowed period`. The first immediate-revocation test failed
+because Alice's old password still bound successfully after rotation; the
+test restored her original credentials. Samba documents this grace period in
+the [4.22 configuration reference](https://www.samba.org/samba/docs/4.22/man-html/smb.conf.5.html#OLDPASSWORDALLOWEDPERIOD).
+The lab now evaluates an explicit zero-minute period so an admin reset can
+invalidate old credentials immediately. New lab provisioning sets this
+option; `strict-password-policy.py` updates an existing owned lab directory.
+This is a candidate deployment policy requiring inclusion in the final M0
+architecture decision, not a production change. Existing-session revocation
+is a separate requirement even when fresh logins reject the old password.
+With the zero-minute lab policy, fresh-login lifecycle tests passed across
+LDAPS, member SMB, and Gitea: old credentials denied, rotated credentials
+accepted, disabled account denied, and restored original credentials accepted.
+The test uses `finally` to re-enable/reset only synthetic Alice; no production
+identity is involved. The native directory comparison passed after the policy
+restart with unchanged GUID/SID values.
+
+Cold whole-VM restore also passed. `verify-checkpoint.py snapshot` wrote a
+retained SMB file as Alice and recorded its hash, numeric ownership, mode,
+POSIX ACL, xattrs, and Gitea account ID. After guest clean poweroff and QEMU
+exit, `lab.py restore` flattened the stopped disk into an independent
+read-only `checkpoint.qcow2`, recorded its SHA256, and booted a new writable
+overlay backed by that checkpoint. The original guest remains stopped.
+The restored guest uses loopback SSH port 12223 with the pinned cloned host
+key (`lab.py restored-ssh '<command>'`). It passed actual GUID/SID comparison,
+a changed kernel boot ID, Gitea directory login, all guest SMB group checks,
+and exact checkpoint metadata/content comparison. No service configuration
+was reapplied to make the restored services start. The verifier needed a
+bounded LDAP startup timeout retry on the emulated guest.
+
+This is a consistent whole-machine backup/restore proof, not a substitute for
+the future operator-facing application backup/restore workflow. The checkpoint
+contains synthetic credentials and must remain private in ignored lab storage.
+`restore` refuses a running original guest or an existing checkpoint; it never
+overwrites evidence. Do not run `provision` against the retained failed LXC lab.
+
+In the restored guest, `verify-migration.py` passed migration of a synthetic
+local Gitea account through supported APIs. It preserved the account ID and
+username, private repository ID/ownership and commit SHAs, working SSH access,
+and existing API token mapping. The former local password was rejected.
+The source ID was resolved from verified Alice's account, not assumed.
+The synthetic SSH key and token were removed after the checks. SSH host
+verification used the public host key read from the owned Gitea container.
+A secret-free migration report remains inside the guest lab state directory.
+
+`verify-macos.py` exercised the restored guest using the workstation's
+native SMB filesystem driver through loopback port 11445 forwarded to the
+guest's loopback share port. Engineering reads/writes/deletes, Reader reads
+but cannot write. Outsider cannot mount but reports a generic timeout; this
+case required explicit share-denial evidence. Each connection forces a new
+session. The helper suppresses credential output, unmounts the temporary
+shares, closes its tunnel, and never recursively removes mount directories.
+No SMB mounts remained after acceptance. Windows acceptance remains open;
+macOS and Linux CLI results do not stand in for it. The initial helper treated
+any outsider mount failure as denial; a stricter check exposed the generic
+timeout, so that earlier inference is not counted as acceptance. Temporary
+server debug logging confirmed Outsider authenticates with NTLMv2, but did
+not initially establish an explicit share denial; normal logging was restored.
+Subsequent config-level debug tracing captured the native Mac attempt at
+2026-11-07 09:48:40 UTC: Outsider authenticated successfully, followed by
+`create_connection_session_info` rejecting that same user from `projects`
+and SMB2 tree-connect returning `NT_STATUS_ACCESS_DENIED`. This establishes
+server authorization denial rather than inferring it from the timeout.
+Normal config-level and runtime logging were restored afterward. The native
+helper still fails closed on a generic timeout; it needs correlated server
+tracing for this case. The misleading tunneled-client error remains a
+diagnostic limitation, not a permissions bypass.
+
+DNS registration warnings were subsequently resolved in the restored guest.
+The default systemd resolver routed AD-zone lookups upstream rather than to
+the native DC, so the updater attempted to add records already present.
+An explicit resolved routing domain sends `m0.smolofis.test` to 172.31.83.10;
+Samba forwards external queries to the guest's 10.0.2.3 upstream. Normal
+system-resolver SRV lookup and `samba_dnsupdate --verbose` then passed with
+exit zero. New provisioning includes this routing; `configure-dns.py` applies
+it to existing owned lab guests. The DNS routing and successful automatic
+registration also persisted across a subsequent kernel reboot. DNS/time
+failure scenarios remain open.
+
+`verify-faults.py` subsequently passed bounded outage/recovery acceptance in
+the restored VM. A temporary nftables table blocked DNS requests to the AD
+server; normal resolver SRV lookup failed as expected. Removing the table,
+resetting resolver server features/backoff, and flushing caches restored lookup
+within bounded retries. The first immediate recovery check failed because the
+resolver retained its failure state; this established the required recovery
+steps rather than assuming rule removal alone was sufficient. Fault rules are
+removed in `finally` and existing tables are never overwritten.
+
+The same test disabled NTP, observed `NTP=no`, re-enabled it in `finally`, and
+verified synchronized status returned. Cached `NTPSynchronized=yes` by itself
+is not evidence of a running synchronization service. No guest or host clock
+was changed. Kerberos clock-skew behavior is not covered by this service-outage
+test. A secret-free `fault-report.json` remains inside the guest lab state.
+
+`verify-clock-skew.py` subsequently passed the separate Kerberos skew case:
+normal-time Alice login succeeded, a process-local +10-minute clock produced
+an explicit clock-skew error, and normal-time login succeeded again. It uses
+`krb5-user` and `libfaketime` (install only in the disposable lab), a private
+temporary credential cache/config, and `kdc_timesync=0` so client-side time
+correction cannot mask the injected skew. No system clock, global Kerberos
+configuration, or real user credential cache changes. See
+[libfaketime](https://github.com/wolfcw/libfaketime) and the
+[MIT Kerberos configuration reference](https://web.mit.edu/Kerberos/www/krb5-current/doc/admin/conf_files/krb5_conf.html).
+The secret-free result is `clock-skew-report.json` inside guest lab state.
+
+Application-level directory restore subsequently passed using
+`verify-domain-restore.py`. It stopped lab clients and the original DC, created
+a supported offline backup, restored into a fresh tree as replacement DC
+`dc-r0`, and started Samba against that restored configuration/database.
+Trusted LDAP, SYSVOL, actual restored GUID/SID values, existing Gitea login,
+member share permissions, retained file contents/numeric ownership/mode/ACLs/
+xattrs, and Gitea account mapping all passed. Server TLS keys/certificates were
+recovered from the backup; client CA trust was retained. The machine verifier
+reads the active config's private/SYSVOL paths so an untouched old database
+cannot produce a false restore pass. Failed attempts and original databases
+are retained; failed validation restores the original config and services.
+
+Recovery requirements found by this test:
+
+- Install `tdb-tools` for the supported offline backup command.
+- Create the cache directory emitted by restored configuration before validation.
+- Use short runtime paths (here `/var/lib/m0-ad/<id>`): the first long path
+  exceeded Winbind's Unix socket path limit and prevented the DC from staying up.
+- Keep backup/private trees root-only while allowing traversal to SYSVOL.
+- Explicitly retain the tested zero-minute password grace policy and point
+  server TLS configuration at backup-recovered material.
+- Run supported `samba-tool ntacl sysvolreset` and `sysvolcheck` before
+  acceptance: the restored SYSVOL root initially lacked native `security.NTACL`.
+  This proves default SYSVOL/GPO permissions only; custom GPO ACL preservation
+  requires its own migration/restore acceptance.
+
+The successful attempt resumed retained ID `99392ee495` after its backup and
+fresh-tree restore already passed, applying the SYSVOL repair before repeating
+all functional checks. Fresh runs include those repair/check steps directly.
+`domain-restore-report.json` records the archive hash, replacement DC, active
+private directory, and passed checks. The successful replacement remains the
+active DC in the disposable restored guest; the original QEMU guest is stopped.
+
+The retained checkpoint file's contents, numeric ownership/mode, ACL and xattrs
+also remained unchanged across another complete password rotation and account
+disable/re-enable cycle in the restored guest. Gitea's mapped account ID
+remained unchanged; Alice's original synthetic password was restored afterward.
 
 ## Acceptance matrix
 

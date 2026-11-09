@@ -60,7 +60,7 @@ jobs:
           cargo clippy --locked --all-targets --target x86_64-unknown-linux-musl -- -D warnings
 
       - name: Check shell scripts
-        run: shellcheck -S warning scripts/*.sh
+        run: shellcheck -S warning scripts/*.sh scripts/dev/identity/verify-audit-lifecycle.sh
 
       - name: Check dependency advisories
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2

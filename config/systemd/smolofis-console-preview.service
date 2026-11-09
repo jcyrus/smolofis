@@ -16,6 +16,7 @@ Environment=RUST_LOG=info
 NoNewPrivileges=yes
 CapabilityBoundingSet=
 ProtectSystem=strict
+ReadOnlyPaths=/run
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
