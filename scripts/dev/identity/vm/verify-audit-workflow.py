@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 ROOT = Path('/var/lib/smolofis-identity-machine-lab')
-BINARY = Path('/opt/smolofis-panel-audit-lab/smolofis-panel')
+BINARY = Path('/opt/smolofis-receipt-journal-lab/smolofis-panel' if sys.argv[1:] in (['--lifecycle'], ['--inside-lifecycle']) else '/opt/smolofis-panel-audit-lab/smolofis-panel')
 WRAPPER = Path('/opt/smolofis-identity-lab/vm/smolofis-admin.sh')
 if (os.geteuid() != 0 or not Path('/etc/smolofis-m0-fullvm').exists()
         or not (ROOT / 'domain-ready').exists() or Path('/etc/smolofis-release').exists()
@@ -47,7 +47,16 @@ if sys.argv[1:] == ['--inside-lifecycle']:
     identity.mkdir(mode=0o700)
     shutil.copyfile('/etc/machine-id', identity / 'machine-id')
     helper = Path('/opt/smolofis-identity-lab/vm/verify-audit-lifecycle.sh')
+    # Model the UEFI CI path: previous nightly prepares bytes; new candidate
+    # verifies the event only after an actual upgrade in the full ISO test.
+    older = Path('/opt/smolofis-operation-listing-lab/smolofis-panel')
+    older_report = ROOT / 'operation-listing-0ec98ed3f7/report.json'
+    assert hashlib.file_digest(older.open('rb'), 'sha256').hexdigest() == json.loads(older_report.read_text())['binary_sha256']
+    shutil.copyfile(older, '/usr/local/bin/smolofis-panel')
+    Path('/usr/local/bin/smolofis-panel').chmod(0o755)
     subprocess.run(['bash', str(helper), 'prepare'], check=True, timeout=30)
+    shutil.copyfile(BINARY, '/usr/local/bin/smolofis-panel')
+    Path('/usr/local/bin/smolofis-panel').chmod(0o755)
     subprocess.run(['bash', str(helper), 'verify'], check=True, timeout=30)
     # CI has /dev/kvm; systemd reports kvm instead of qemu there. Exercise
     # both supported detector results and an unsupported result explicitly.
@@ -71,15 +80,23 @@ if sys.argv[1:] == ['--inside-lifecycle']:
     assert subprocess.run(['bash', str(helper), 'verify'], capture_output=True).returncode != 0
     state_path.write_bytes(before)
     subprocess.run(['bash', str(helper), 'verify'], check=True, timeout=30)
-    report = {'checks': ['prepare and verify locked schema-v2 fixture',
+    checkpoint = Path('/var/lib/smolofis/ci-audit-lifecycle/receipt-checkpoint.jsonl')
+    original_checkpoint = checkpoint.read_bytes()
+    checkpoint.chmod(0o600)
+    checkpoint.write_bytes(original_checkpoint + b' ')
+    checkpoint.chmod(0o400)
+    assert subprocess.run(['bash', str(helper), 'verify'], capture_output=True).returncode != 0
+    checkpoint.chmod(0o600); checkpoint.write_bytes(original_checkpoint); checkpoint.chmod(0o400)
+    subprocess.run(['bash', str(helper), 'verify'], check=True, timeout=30)
+    report = {'checks': ['previous-reader preparation and candidate verification of locked schema-v2 and checkpoint-only history',
                          'QEMU and KVM detector acceptance with unsupported VM refusal',
-                         'refuse fixture overwrite', 'detect changed state bytes'],
+                         'refuse fixture overwrite', 'detect changed state bytes', 'detect changed checkpoint bytes'],
               'binary_sha256': hashlib.file_digest(BINARY.open('rb'), 'sha256').hexdigest(),
               'helper_sha256': hashlib.file_digest(helper.open('rb'), 'sha256').hexdigest(),
               'private_mount_namespace': True, 'actual_ab_boot_tested': False,
               'production_modified': False}
     (evidence / 'report.json').write_text(json.dumps(report, indent=2))
-    print('PASS: four lifecycle gate component checks; evidence retained at ' + str(evidence), flush=True)
+    print('PASS: five lifecycle gate component checks; evidence retained at ' + str(evidence), flush=True)
     raise SystemExit(0)
 previous_path = max(ROOT.glob('local-audit-*/report.json'), key=lambda p: p.stat().st_mtime)
 previous = json.loads(previous_path.read_text())
