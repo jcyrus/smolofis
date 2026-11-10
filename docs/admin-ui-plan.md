@@ -5,6 +5,9 @@ Rust/Axum/Askama panel. Primary tasks: people and groups, shared folders, and
 service diagnosis. Central identities apply to hosted services; employee
 computer sign-in is deferred.
 
+Current production status (2026-11-09): `192.168.1.17` runs dev.78 on active
+system-a. Administration remains disabled; system-b/dev.73 is retained.
+
 Update this file with evidence as work completes. A checked milestone means
 its acceptance criteria have passed, not merely that code exists.
 
@@ -30,6 +33,13 @@ feature rollout, not identity/share management acceptance or a backup restore.
 R0 permits code delivery with features disabled; it does not authorize enabling
 identity administration or replace M0/M1/M6 acceptance.
 
+## R1 — Deliver validated audit/identity groundwork with administration disabled
+
+- [x] PR #22 merged as `1e38c1033676eac4482d098c8179450c4bdc4a9e` on 2026-11-09.
+- [x] Main [CI run 42592333876](https://github.com/jcyrus/smolofis/actions/runs/42592333876) passed compilation, ISO assembly, smoke, BIOS/UEFI installation/update/rollback, and release publication.
+- [x] Published nightly `0.1.0-dev.78`; downloaded manifest signature verifies against `config/release/allowed_signers`. Signed ISO SHA256 `2a91dfa81d4683123c3487194a6a323294b3449df6ef27214b3a674449555313` matches GitHub asset metadata. Full ISO download/checksum verification remains part of server staging.
+- [x] Upgrade `192.168.1.17` to dev.78 through its signed updater with pinned manifest/ISO SHA256 and fresh backup `20261109T094858Z`. Backup tar archives and database dump parsed successfully. Reboot verified dev.78 on promoted system-a, boot ID `917cebe9-f650-4e12-b742-eddd54f4a511`, phase ready, no failed units, healthy core containers, Gitea 28.2.0, persisted Coolify user, working operator session and public dashboard. Durable machine ID initialized and matches runtime; system-b/dev.73 retained. Console/login/assets return 404, candidate admin units remain absent and no admin flags are configured (2026-11-09).
+
 ## M0 — Identity feasibility gate (acceptance tasks)
 
 - [x] Inspect current panel, persistence, service privilege boundaries, and local development tooling.
@@ -45,7 +55,10 @@ identity administration or replace M0/M1/M6 acceptance.
 - [x] Full-kernel x86 Debian 13 VM: certificate-verified LDAPS and SYSVOL read with native `security.NTACL` (2026-11-07).
 - [x] Prove directory authentication against shipped Gitea 28.2.0 on the full VM; directory login grants no automatic administrator rights.
 - [x] Guest SMB baseline: writer/read-only/denied groups, shared content read, and healthy domain join. Native Windows/macOS acceptance remains below.
-- [ ] Prove group-based read-only/read-write SMB access from Windows and macOS.
+- [x] Prove group-based read-only/read-write/denied SMB access from native Windows and macOS. Windows 23H2 acceptance completed with user-reported operations and server-correlated authentication/authorization (2026-11-09).
+- [x] Native Windows 11 23H2 writer acceptance: user confirmed an OK mapping as Alice, retained evidence-file read, probe write/read and successful deletion through the restricted temporary lab relay (2026-11-09). Reader and outsider acceptance subsequently passed below.
+- [x] Native Windows reader acceptance: user confirmed an OK mapping, retained evidence-file read and Access denied on probe creation as Reader (2026-11-09). Outsider acceptance subsequently passed below.
+- [x] Native Windows outsider acceptance: user received Windows System Error 5; server trace confirms M0\outsider authenticated with NTLMv2 and was explicitly denied projects. Credential-free evidence retained at `windows-acceptance-bd98aa8abf`; temporary proxy/listeners/firewall/timers/SSH masters cleaned up and normal lab logging restored (2026-11-09).
 - [x] Native macOS mounts: writer read/write/delete and reader read with denied write; temporary mounts and loopback tunnel cleaned up (2026-11-07).
 - [x] Validate native macOS outsider denial with correlated Samba trace: authenticated Outsider explicitly rejected from `projects` with `NT_STATUS_ACCESS_DENIED` (2026-11-07). macOS presents a generic timeout over the lab tunnel; preserve this diagnostic limitation. Windows remains pending.
 - [x] Verify password changes, account disabling, stable ownership, and existing Gitea account migration on the full VM (2026-11-07).
@@ -57,8 +70,8 @@ identity administration or replace M0/M1/M6 acceptance.
 - [x] Full-VM kernel reboot: changed boot ID, stable GUID/SID, automatic directory/file/Gitea startup, directory login, and guest SMB group permissions (2026-11-07). DNS/time failure acceptance is recorded separately above.
 - [x] Cold whole-VM backup/restore into a separate guest disk: directory IDs, Gitea account ID, SMB contents, numeric ownership/mode, ACLs, xattrs, and group access preserved (2026-11-07). Application-level directory restore remains separate.
 - [x] Supported offline directory backup/restore into a replacement DC: restored TLS material, native SYSVOL ACL reset/check, stable GUID/SID, trusted login, existing member/Gitea access, and retained file metadata/mappings (2026-11-07). Custom GPO ACLs are outside this default-SYSVOL acceptance.
-- [ ] Finalize deployment topology and the full-VM evidence report.
-- [x] Consolidate [M0 evidence and conditional topology recommendation](identity-m0-evidence.md). Final acceptance awaits native Windows evidence.
+- [x] Finalize v1 topology and full-VM/native-client evidence: native Samba AD on a full-kernel appliance OS, separate domain-member file service, and explicit Gitea LDAP/account mapping. M0 feasibility accepted for the tested scope; production packaging, restricted operations, HTTPS/mobile and lifecycle integration retain M1/M3–M6 gates (2026-11-09).
+- [x] Consolidate [M0 evidence and conditional topology recommendation](identity-m0-evidence.md). Native Windows evidence completed the remaining M0 client gate on 2026-11-09.
 
 Release gate: do not enable or release identity administration until this
 prototype passes. The user approved continuing console implementation behind
@@ -74,8 +87,11 @@ See [prototype protocol](identity-prototype.md).
 - [x] Preview device-specific first-admin enrollment through local console/SSH, verifying an existing directory administrator and binding its GUID/configuration to the appliance machine ID.
 - [x] Preview directory-independent local status/lock controls and verified re-enrollment after connectivity returns. Directory repair and full restore acceptance remain M0/M6 gates.
 - [x] Add an opt-in private HTTPS transport candidate: fixed loopback backend, required HTTPS enrollment, read-only Tailscale/backend preflight, and separate foreground-Serve service units. Preliminary local TLS acceptance passes.
-- [ ] Validate HTTPS/private Tailscale access on the full VM and real tailnet: certificate issuance/renewal, policy isolation, phone access, foreground cleanup, and actual service sandbox execution.
-- [x] Actual backend/worker systemd execution: nine native VM checks passed for the single-file audit write exception, explicit read-only `/run`, home isolation, capabilities/seccomp, fixed loopback/authentication, atomic recovery, kernel peer UID, bounded typed protocol, AF_UNIX-only worker, and cleanup (2026-11-09). Real HTTPS/Serve/tailnet/mobile acceptance remains pending.
+- [ ] Complete private HTTPS production integration. V1 is restricted to the owner account/devices; distinct employee/admin tailnet policy testing is deferred by user decision (2026-11-10), not proven. See [real-tailnet evidence](admin-private-access.md#real-personal-tailnet-acceptance--2026-11-09).
+- [x] Personal-tailnet full-VM acceptance: nine real HTTPS/authentication peer checks and user-confirmed phone cellular HTTPS/sign-in passed (2026-11-09).
+- [x] Certificate issuance and controlled renewal/rotation passed without exporting private keys or changing the clock. Natural scheduled renewal remains unobserved (2026-11-09).
+- [x] Six actual HTTPS/Serve lifecycle checks passed, including stop, process crash, backend dependency, direct-backend isolation and ordinary reboot. Lab accounts/runtime units removed; node logged out and tailscaled stopped/disabled (2026-11-09).
+- [x] Actual backend/worker systemd execution: nine native VM checks passed for the single-file audit write exception, explicit read-only `/run`, home isolation, capabilities/seccomp, fixed loopback/authentication, atomic recovery, kernel peer UID, bounded typed protocol, AF_UNIX-only worker, and cleanup (2026-11-09). Personal-tailnet HTTPS/Serve/mobile acceptance subsequently passed; distinct employee network-policy isolation remains pending.
 - [ ] Separate privileged service with restricted Unix socket and typed, allowlisted operations.
 - [ ] CSRF protection, login throttling, secure sessions, and secret-free auditing.
 - [x] Root-only historical operation lookup by ID: current receipt or bounded read-only history; coherent completion required, nonblocking busy-log behavior, partial-tail reporting, and unknown outcomes preserved. 67 host tests and eight native Linux history checks passed (2026-11-09). Listing, archive discovery/retention, superseded crash reconciliation, and the general journal remain pending.
@@ -87,9 +103,11 @@ See [prototype protocol](identity-prototype.md).
 - [x] Open draft [PR #22](https://github.com/jcyrus/smolofis/pull/22) on isolated branch `admin/audit-lifecycle-validation` and start full [CI run 42577895520](https://github.com/jcyrus/smolofis/actions/runs/42577895520). Initial run passed compilation, ISO assembly and smoke tests; BIOS/UEFI install jobs stopped at an overly narrow QEMU-only fixture guard. The helper now accepts QEMU/KVM with unsupported-VM refusal covered by four native component checks; full rerun, publication and server upgrade remain pending.
 - [x] Fix installed-image machine-ID persistence exposed by CI run 42582007436: restore a per-device durable ID in initramfs before systemd, keep enrollment binding strict, and hash both ID files in the lifecycle gate. Eight native checks (including real initramfs packaging) and four lifecycle fixture checks passed; full image rerun remains pending.
 - [x] Full BIOS and UEFI ISO install tests passed in run 42585992507: locked enrollment, both machine-ID files, live log/archive/manifest and historical lookup survive signed A/B promotion and corrupted-slot fallback; administration stays disabled. The run's separate smoke fixture failed on runner-owned persistence; its offline ownership repair passed native checks and awaits CI rerun.
-- [ ] Validate the archival workflow in a signed nightly image and upgrade/rollback path before release; assess physical storage power-loss durability before claiming hardware-level guarantees.
+- [x] Complete [PR #22 CI run 42589005839](https://github.com/jcyrus/smolofis/actions/runs/42589005839) passed on `2d1a0df`: compilation/lint/advisories/unit tests, ISO assembly, smoke boot, BIOS and UEFI installation, signed test-bundle A/B upgrade and corrupted-slot rollback. Runtime/saved machine IDs, locked enrollment and audit history survive; administration stays disabled. Release job skipped for the draft PR; no nightly publication or production upgrade occurred (2026-11-09).
+- [x] Publish and validate production-signed dev.78 with administration disabled, then complete the backed-up server rollout and post-checks under R1 (2026-11-09).
+- [ ] Assess physical storage power-loss durability before claiming hardware-level guarantees; VM termination and syscall fault tests do not establish device-cache power-loss behavior.
 - [x] Local operation receipts/correlation: schema-v2 state atomically records the latest applied operation ID; audit authorization/completion/uncertainty are correlated. Host regressions, native completion-write process crash, legacy-v1 read, and real VM-reboot receipt recovery passed (2026-11-09). Known-ID history lookup is recorded above; general operation journaling and appliance upgrade/rollback integration remain pending. See [operation receipts](admin-operations.md).
-- [x] Audit crash-tail hardening: preserve incomplete records and refuse new appends; sign-in issues no session/cookie on tail/capacity failure. Four-process append and write-error regressions pass on macOS (2026-11-09). Complete operation/recovery auditing and real HTTPS/Serve acceptance remain pending.
+- [x] Audit crash-tail hardening: preserve incomplete records and refuse new appends; sign-in issues no session/cookie on tail/capacity failure. Four-process append and write-error regressions pass on macOS (2026-11-09). Complete operation/recovery auditing remains pending; personal-tailnet HTTPS/Serve acceptance subsequently passed.
 - [x] Local recovery audit preview: root-attributed enrollment authorization precedes access changes; lockdown persists even if audit open/append fails, with explicit partial-failure reporting. Ordering/failure regressions pass locally (2026-11-09). Linux/root acceptance is recorded below; a complete correlated operation journal remains pending.
 - [x] Full-kernel Linux local-audit acceptance: nine checks passed for real LDAPS enrollment, root/file ownership, UID 65534 rejection, invalid audit files, crash tails, protected-file aliases, real ENOSPC, lockdown recovery, and independent CLI writers (2026-11-09). Disposable tmpfs unmounted; web acceptance is recorded below. Operation-result correlation remains pending.
 - [x] Full-kernel Linux web-audit acceptance: seven checks passed with UID/GID 65534 and zero effective capabilities; startup ownership/path checks, real LDAPS attribution, crash-tail/ENOSPC login denial, logout and group-revocation token invalidation, combined audit-failure lockdown, and recovered logging (2026-11-09). Writers stopped and tmpfs unmounted. Backend/worker sandbox acceptance is recorded above; sync faults, retention, and operation-result correlation remain pending.
@@ -296,3 +314,16 @@ failures and never log credentials.
   `192.168.1.17` reports dev.73, `smolofis-panel` active, and `/console` HTTP 404.
   No `SMOLOFIS_CONSOLE_ENABLED` service environment entry was present.
   Administration remains disabled; no production configuration was changed.
+
+### Account-only private access follow-up — 2026-11-10
+
+- [x] Record user-approved v1 owner-account/devices-only scope. Separate employee network-policy testing is deferred and must precede adding other users or sharing administration.
+- [x] Clean up reactivated HTTPS trial `135d5487`: temporary accounts/configuration and foreground Serve removed; lab logged out and tailscaled stopped/disabled.
+- [x] Configure production Tailscale `accept-dns=false` to preserve NetworkManager DNS; resolver hash unchanged and external DNS lookup passed. Add the same default to source connection/autoconnect helper.
+- [ ] Validate DNS health after an authorized production tailnet connection. The existing resolve1 warning remains in stopped-node status; configuration alone does not establish connected acceptance.
+
+### Operation discovery follow-up — 2026-11-10
+
+- [x] Implement root-only selected-file `console-operation-list` preview: protected bounded snapshot, 4096-operation cap, consistent completion validation, lexical IDs, unknown outcomes and explicit partial-tail status.
+- [x] Validate operation listing through the packaged wrapper on native Linux: eight checks passed for standard-log discovery, read-only archive overrides, retained real crash/unknown outcomes, busy locks, ownership/mode/links, malformed/orphan records, size/missing/empty history, non-root/argument denial and unchanged bytes. Private evidence: `operation-listing-0ec98ed3f7` (2026-11-10).
+- [ ] Review and publish operation-listing and DNS-helper changes through CI. Archive discovery/pagination and complete operation journaling remain open.

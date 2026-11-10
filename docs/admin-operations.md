@@ -226,3 +226,90 @@ sudo. The boot ownership guard remains strict. Nine native checks passed,
 including reproduction and repair of non-root copied inode ownership:
 `/var/lib/smolofis-identity-machine-lab/machine-id-4ae1dc0101/`.
 All-green CI remains pending the smoke fixture correction.
+
+
+Final CI run [42589005839](https://github.com/jcyrus/smolofis/actions/runs/42589005839)
+passed on commit `2d1a0df` (2026-11-09). Compilation, lint/advisory/unit checks,
+ISO assembly, smoke boot, and both complete BIOS/UEFI installation jobs are green.
+Both firmware jobs verify identity/enrollment/audit persistence after signed
+A/B promotion and corrupted-slot fallback, and confirm administration stays
+disabled. This is acceptance of the candidate image and test-signed update bundle;
+the release job was skipped for the draft PR. No production signing/publication,
+main merge, or server upgrade occurred. Physical storage power-loss durability,
+older-reader policy, and administration enablement retain their separate gates.
+
+
+## Production dev.78 rollout — 2026-11-09
+
+The authorized upgrade of `192.168.1.17` completed using the installed signed
+updater. Its manifest was verified against the server's trusted signers and
+pinned to dev.78; the downloaded ISO checksum matched
+`2a91dfa81d4683123c3487194a6a323294b3449df6ef27214b3a674449555313`.
+Updater backup `20261109T094858Z` completed before writing inactive system-a;
+all backup tar archives parsed and the PostgreSQL dump passed `pg_restore --list`.
+This checks archive readability, not a production restore exercise. The staging
+bundle and apply log remain under `/var/lib/smolofis/dev78-stage.xHwDNv/`.
+
+After reboot, dev.78 reached ready and its verifier promoted system-a with
+`Result=success`, `ExecMainStatus=0`, and an empty next_slot. The previous
+system-b/dev.73 kernel, initrd and squashfs remain available. Boot ID changed
+from `5854865d-67fd-4ecd-bc7b-2a006ae2bec8` to
+`917cebe9-f650-4e12-b742-eddd54f4a511`. No failed units remained. Docker, panel,
+infrastructure and SSH were active; core containers were healthy, Gitea reported
+28.2.0, the persisted Coolify users table contained one user, the dashboard
+returned 200, and the operator had an active user manager and runtime directory.
+
+The new early-boot step initialized durable identity on this previously
+unenrolled server. Its runtime machine-ID file matches the protected saved copy
+(mode 0644 runtime, 0600 saved under root-owned mode-0700 identity storage).
+This one-time adoption changes the former volatile ID. A second hardware
+reboot was not performed; repeated-boot/update identity persistence has separate
+full-ISO BIOS/UEFI CI acceptance. No enrollment binding was weakened or rewritten.
+
+Administration remains disabled: console, sign-in and console asset routes
+returned 404; worker/private-console units were not found; no console/auth
+service flags were configured. No identity/share management was enabled.
+Physical power-loss, Windows client, real tailnet/mobile and remaining
+management/lifecycle acceptance gates remain open.
+
+## Root-only operation listing preview
+
+`sudo smolofis-admin console-operation-list` lists operation IDs, kinds and
+outcomes from the selected local audit file. The standard log is selected by
+the wrapper; a root `SMOLOFIS_LOCAL_AUDIT_FILE` override can select one retained
+archive. The direct binary command is `--auth-operation-list`.
+
+The command requires root and uses the same trusted-file, read-only descriptor,
+nonblocking shared-lock and 16 MiB snapshot checks as known-ID lookup. It emits
+JSON with `version`, `source: selected_audit_file`, `operations`, and
+`incomplete_tail`. IDs are normalized and sorted lexically, not chronologically.
+At most 4096 distinct operations are accepted; excess history returns an error,
+not a silently truncated result. Only complete newline-terminated records are
+considered. An incomplete final fragment is flagged; a begin without completion
+retains `unknown`. Orphan or conflicting outcomes, bad attribution, missing or
+malformed operation IDs, and unsupported records refuse the listing.
+
+Listing does not consult current enrollment receipts, discover archives, merge
+files, reconcile superseded crashes, paginate, or mutate history. Empty history
+is valid. An error is not an empty successful listing. No passwords, session
+material, arbitrary request fields or directory lookups are included.
+Host tests and lint checks cover this preview. Eight native Linux wrapper
+checks passed on 2026-11-10: standard-log discovery; root archive override;
+retained real crash/unknown outcomes; prompt busy-lock refusal and recovery;
+unsafe ownership/mode/symlink/hardlink refusal; corrupt/unsupported/orphan
+records; oversized/missing/empty history; non-root and extra-argument denial,
+with standard/read-only/crash file bytes preserved. The test ran in a private
+mount namespace with the exact shipped wrapper and candidate static x86_64
+binary. Temporary mounts disappeared with namespace exit; no production
+configuration or installed VM binaries were replaced.
+
+Private report:
+`/var/lib/smolofis-identity-machine-lab/operation-listing-0ec98ed3f7/report.json`.
+Reproduce after building the Linux artifact into
+`work/identity-m0-vm/panel-listing`:
+
+```sh
+python3 scripts/dev/identity/vm/lab.py check-operation-listing
+```
+
+Release CI/publication remains pending. Production binary is unchanged.

@@ -84,19 +84,29 @@ fn parse_history(bytes: &[u8], id: &str) -> Result<OperationHistory> {
         .iter()
         .rposition(|byte| *byte == b'\n')
         .map_or(0, |index| index + 1);
+    let records = bytes[..complete]
+        .split_inclusive(|byte| *byte == b'\n')
+        .map(|line| serde_json::from_slice::<Record>(line).context("invalid audit history record"))
+        .collect::<Result<Vec<_>>>()?;
+    parse_operation_records(records.iter(), id, complete != bytes.len())
+}
+
+fn parse_operation_records<'a>(
+    records: impl IntoIterator<Item = &'a Record>,
+    id: &str,
+    incomplete_tail: bool,
+) -> Result<OperationHistory> {
     let mut history = OperationHistory {
         operation: None,
         outcome: LocalOutcome::Unknown,
         found: false,
-        incomplete_tail: complete != bytes.len(),
+        incomplete_tail,
     };
     let mut authorized = false;
     let mut applied = false;
     let mut uncertain = false;
     let mut actor: Option<String> = None;
-    for line in bytes[..complete].split_inclusive(|byte| *byte == b'\n') {
-        let record: Record =
-            serde_json::from_slice(line).context("invalid audit history record")?;
+    for record in records {
         anyhow::ensure!(record.version == 1, "unsupported audit history schema");
         if !record
             .operation_id
@@ -122,7 +132,10 @@ fn parse_history(bytes: &[u8], id: &str) -> Result<OperationHistory> {
                     !applied && !uncertain,
                     "authorization follows terminal outcome"
                 );
-                let guid = record.actor_guid.context("missing verified actor")?;
+                let guid = record
+                    .actor_guid
+                    .clone()
+                    .context("missing verified actor")?;
                 anyhow::ensure!(
                     guid.len() == 32 && guid.bytes().all(|byte| byte.is_ascii_hexdigit()),
                     "invalid verified actor"
@@ -186,7 +199,7 @@ fn history_snapshot(file: &File) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-pub fn operation_history(path: &Path, id: &str) -> Result<OperationHistory> {
+fn read_history(path: &Path) -> Result<Vec<u8>> {
     use std::os::unix::fs::MetadataExt;
     anyhow::ensure!(path.is_absolute(), "audit history path must be absolute");
     crate::enrollment::require_trusted_directory(path.parent().context("audit needs a parent")?)?;
@@ -206,7 +219,78 @@ pub fn operation_history(path: &Path, id: &str) -> Result<OperationHistory> {
         opened.ino() == metadata.ino() && opened.dev() == metadata.dev(),
         "audit history changed while opening"
     );
-    parse_history(&history_snapshot(&file)?, id)
+    history_snapshot(&file)
+}
+
+pub fn operation_history(path: &Path, id: &str) -> Result<OperationHistory> {
+    parse_history(&read_history(path)?, id)
+}
+
+#[derive(Serialize)]
+pub struct OperationListing {
+    pub version: u8,
+    pub operations: Vec<OperationReceipt>,
+    pub incomplete_tail: bool,
+    pub source: &'static str,
+}
+
+fn parse_listing(bytes: &[u8]) -> Result<OperationListing> {
+    anyhow::ensure!(
+        bytes.len() as u64 <= MAX_BYTES,
+        "audit exceeds history limit"
+    );
+    let complete = bytes
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |index| index + 1);
+    let mut grouped = std::collections::BTreeMap::<String, Vec<Record>>::new();
+    for line in bytes[..complete].split_inclusive(|byte| *byte == b'\n') {
+        let record: Record =
+            serde_json::from_slice(line).context("invalid audit history record")?;
+        anyhow::ensure!(record.version == 1, "unsupported audit history schema");
+        if let Some(id) = &record.operation_id {
+            anyhow::ensure!(
+                id.len() == 64 && id.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                "invalid operation ID"
+            );
+            let id = id.to_ascii_lowercase();
+            anyhow::ensure!(
+                grouped.contains_key(&id) || grouped.len() < 4096,
+                "too many operations; select a smaller archive"
+            );
+            grouped.entry(id).or_default().push(record);
+        } else {
+            anyhow::ensure!(
+                !matches!(
+                    record.event,
+                    Event::LocalEnrollmentAuthorized
+                        | Event::LocalEnrollmentApplied
+                        | Event::LocalConsoleLocked
+                        | Event::LocalOperationUncertain
+                ),
+                "operation record lacks ID"
+            );
+        }
+    }
+    let mut operations = Vec::with_capacity(grouped.len());
+    for (id, records) in grouped {
+        let history = parse_operation_records(records.iter(), &id, complete != bytes.len())?;
+        operations.push(OperationReceipt {
+            id,
+            operation: history.operation.context("missing operation kind")?,
+            outcome: history.outcome,
+        });
+    }
+    Ok(OperationListing {
+        version: 1,
+        operations,
+        incomplete_tail: complete != bytes.len(),
+        source: "selected_audit_file",
+    })
+}
+
+pub fn operation_listing(path: &Path) -> Result<OperationListing> {
+    parse_listing(&read_history(path)?)
 }
 
 struct AuditIdentity {
@@ -427,6 +511,76 @@ mod tests {
         std::fs::remove_file(path).unwrap();
         std::fs::remove_file(archive).unwrap();
         std::fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn listing_preserves_unknown_and_rejects_orphan_conflicting_or_malformed_history() {
+        let begin = history_event("local_enrollment_authorized", "enrollment", None);
+        let mut bytes = begin.clone();
+        let second = String::from_utf8(history_event(
+            "local_console_locked",
+            "lockdown",
+            Some("applied"),
+        ))
+        .unwrap()
+        .replace(&"ab".repeat(32), &"cd".repeat(32));
+        bytes.extend(second.as_bytes());
+        bytes.extend(b"partial");
+        let listing = parse_listing(&bytes).unwrap();
+        assert!(listing.incomplete_tail);
+        assert_eq!(listing.operations.len(), 2);
+        assert_eq!(listing.operations[0].outcome, LocalOutcome::Unknown);
+        assert_eq!(listing.operations[1].outcome, LocalOutcome::Applied);
+        assert!(parse_listing(&history_event(
+            "local_enrollment_applied",
+            "enrollment",
+            Some("applied")
+        ))
+        .is_err());
+        assert!(parse_listing(
+            &[
+                begin,
+                history_event("local_console_locked", "lockdown", Some("applied"))
+            ]
+            .concat()
+        )
+        .is_err());
+        assert!(parse_listing(b"{}\n").is_err());
+        assert!(parse_listing(&vec![b'x'; MAX_BYTES as usize + 1]).is_err());
+    }
+
+    #[test]
+    fn listing_bounds_distinct_ids_normalizes_case_and_requires_root_attribution() {
+        let line = String::from_utf8(history_event(
+            "local_console_locked",
+            "lockdown",
+            Some("applied"),
+        ))
+        .unwrap();
+        let upper = line.replace(&"ab".repeat(32), &"AB".repeat(32));
+        let listing =
+            parse_listing([line.as_bytes(), upper.as_bytes()].concat().as_slice()).unwrap();
+        assert_eq!(listing.operations.len(), 1);
+        assert_eq!(listing.operations[0].id, "ab".repeat(32));
+        let mut row: serde_json::Value = serde_json::from_str(&line).unwrap();
+        row["actor_uid"] = serde_json::json!(1000);
+        assert!(parse_listing(format!("{}\n", row).as_bytes()).is_err());
+        row["actor_uid"] = serde_json::json!(0);
+        row.as_object_mut().unwrap().remove("operation_id");
+        assert!(parse_listing(format!("{}\n", row).as_bytes()).is_err());
+        let mut bytes = Vec::new();
+        for index in 0..4096 {
+            bytes.extend(
+                line.replace(&"ab".repeat(32), &format!("{index:064x}"))
+                    .as_bytes(),
+            );
+        }
+        assert_eq!(parse_listing(&bytes).unwrap().operations.len(), 4096);
+        bytes.extend(
+            line.replace(&"ab".repeat(32), &format!("{:064x}", 4096))
+                .as_bytes(),
+        );
+        assert!(parse_listing(&bytes).is_err());
     }
 
     fn history_event(event: &str, kind: &str, outcome: Option<&str>) -> Vec<u8> {

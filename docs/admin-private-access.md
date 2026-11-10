@@ -1,14 +1,11 @@
 # Private HTTPS console preview
 
 This adds an opt-in transport candidate for the enrolled read-only console.
-It has not been activated on a real tailnet, and image construction does not
-install or enable the new units. Full VM, actual Tailscale certificate issuance,
-access policy, remote mobile, boot lifecycle, and security acceptance remain
-release gates. Durable actor-attributed auditing is also unfinished.
+The isolated full-kernel VM passed a real personal-tailnet HTTPS/mobile trial
+on 2026-11-09 (details below). Image construction does not install or enable
+the candidate units. Office network-policy isolation, production integration,
+and complete actor-attributed operation auditing remain release gates.
 
-Subsequent 2026-11-09 evidence covers actual backend/worker unit execution in
-the isolated full-kernel Debian VM; see sandbox acceptance below. It does not
-cover Tailscale Serve, real certificates, network policy, or phone access.
 
 ## Transport layout
 
@@ -237,4 +234,96 @@ overrides. Reproduce after preparing the [local audit fixture](admin-enrollment.
 python3 scripts/dev/identity/vm/lab.py check-service-sandbox
 ```
 
-Real tailnet/certificate/policy/mobile/Serve lifecycle acceptance remains open.
+The subsequent real-tailnet trial below covers certificates, mobile access and
+Serve lifecycle. Distinct employee network-policy denial remains open.
+
+## Real personal-tailnet acceptance — 2026-11-09
+
+The owner approved only `smolofis-m0-private` in their existing personal tailnet,
+confirmed that only their devices use it, and enabled HTTPS certificates after
+being informed about certificate-transparency publication. Production was not
+joined or enrolled. Tailscale 1.104.5 ran in the restored full-kernel Debian VM
+with DNS acceptance, route acceptance and Tailscale SSH disabled, and netfilter
+mode off to preserve the existing AD DNS and lab firewall.
+
+The exact dev.78 panel binary (SHA256
+`e961c429b5738786c9283e7f1b3fc6ac1ff1dbfea3497cf1310b62c556b2cc0d`)
+ran under the candidate backend and foreground-Serve systemd units. Temporary
+entries in `/run/systemd/system` supplied lab paths and accounts; neither unit
+was enabled or installed into an image. The backend retained its fixed loopback
+listener and service hardening.
+
+- Nine real peer checks passed: publicly trusted certificate/hostname,
+  unauthenticated telemetry rejection, forged identity-header rejection, Host
+  validation, secure cookie attributes, cross-origin and CSRF rejection,
+  non-administrator directory-account rejection, administrator sign-in and
+  protected access, and logout/session invalidation.
+- The user confirmed HTTPS and sign-in on a phone over cellular with Wi-Fi off.
+- One controlled certificate renewal passed using `tailscale cert --min-validity`:
+  serial and expiry changed, and the existing HTTPS service presented the new
+  certificate. Only public certificates were exported; no private key or system
+  clock change was required. Natural scheduled renewal was not observed.
+- Six lifecycle checks passed: renewed certificate presentation; inaccessible
+  direct backend; normal Serve stop; Serve process crash cleanup; backend/HTTPS
+  dependency stop and explicit restart; and ordinary VM reboot. After reboot,
+  tailnet connectivity and the renewed certificate cache persisted, while the
+  temporary console units and HTTPS session stayed off. This does not establish
+  future production autostart behavior or hardware power-loss durability.
+
+Evidence is retained privately under
+`/var/lib/smolofis-identity-machine-lab/private-https-398db315/`, including
+`peer-report.json`, `renewal.json`, `lifecycle-report.json`, typed audit logs,
+unit journals and `trial-record.json`. Helpers are
+`scripts/dev/identity/vm/private-https-trial.py`,
+`verify-private-https-peer.py` and `check-private-https-lifecycle.py` in that
+same source directory. Passwords are supplied through protected local input,
+not stored in reports or source.
+
+Cleanup completed: foreground Serve configuration empty, temporary directory
+accounts/group and backend account removed, runtime configuration/unit entries
+removed, lab node logged out, and lab tailscaled disabled and stopped. No console
+backend or HTTPS listener remains. The issued public certificate remains in
+certificate-transparency history.
+
+Remaining gates: demonstrate allowed administrator and denied employee network
+access using distinct tailnet identities; finish production service/deployment
+integration and renewal monitoring. Directory non-administrator login denial
+passed but does not prove network-policy isolation. Production Tailscale was
+previously `NeedsLogin`, with a missing `org.freedesktop.resolve1` DNS integration
+warning; DNS handling needs an explicit production decision before joining.
+Production was rechecked read-only on 2026-11-10: SSH reachable, dev.78,
+`/console` returned 404, no backend listener on 8091, no failed systemd units,
+Tailscale `NeedsLogin` and Serve configuration empty. The DNS integration warning
+remains. This trial made no production configuration changes.
+
+### Reactivated access-policy trial — 2026-11-10
+
+At the owner's request, the isolated lab was reapproved and reactivated at the
+same HTTPS hostname. Nine real-peer HTTPS/authentication checks passed again.
+The temporary console and foreground Serve are currently active for user testing;
+production configuration remains unchanged. The earlier cleanup above applies
+to the completed `398db315` trial, not this active trial.
+Current private evidence directory:
+`/var/lib/smolofis-identity-machine-lab/private-https-135d5487/`.
+Distinct employee tailnet identity/policy acceptance is still pending; denial
+of a directory non-administrator at sign-in is already verified separately.
+
+### Owner-only v1 scope and cleanup — 2026-11-10
+
+The user elected to use only their own account/devices for v1 and defer the
+separate employee tailnet-policy test. The second Mac was connected to a
+different tailnet; its DNS failure does not prove same-tailnet employee denial.
+Revisit policy isolation before adding users or sharing the administration node.
+The `135d5487` trial is now cleaned up: temporary accounts/runtime units removed,
+foreground Serve empty, node logged out and lab tailscaled stopped/disabled.
+
+Production NetworkManager owns `/etc/resolv.conf`; systemd-resolved is inactive.
+Applied `tailscale set --accept-dns=false` without joining a tailnet. Resolver
+SHA256 remained unchanged and `getent ahostsv4 github.com` succeeded. Console
+remains 404 and Tailscale remains `NeedsLogin`. The stopped-node status still
+contains the earlier resolve1 warning; connected DNS-health acceptance remains
+pending. Source connection/autoconnect defaults now preserve local DNS as well.
+This disables automatic tailnet DNS consumption on the server; client devices
+may continue using MagicDNS. Roll back the preference with
+`sudo tailscale set --accept-dns=true` only after selecting a working resolver
+integration. See [Tailscale DNS configuration](https://tailscale.com/docs/reference/faq/dns-resolv-conf).

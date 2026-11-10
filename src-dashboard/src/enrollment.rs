@@ -378,6 +378,10 @@ pub async fn command(args: &[String]) -> Result<()> {
             let result = crate::audit_archive::archive(Path::new(source), Path::new(destination))?;
             println!("{}", serde_json::to_string_pretty(&result)?);
         },
+        [operation] if operation == "--auth-operation-list" => {
+            let log = std::env::var_os("SMOLOFIS_LOCAL_AUDIT_FILE").context("local audit file is not configured")?;
+            println!("{}", serde_json::to_string_pretty(&crate::audit::operation_listing(Path::new(&log))?)?);
+        },
         [operation, state, id] if operation == "--auth-operation-status" => {
             anyhow::ensure!(valid_hex(id, 64), "operation ID must contain 64 hex characters");
             let path = Path::new(state);
@@ -411,7 +415,7 @@ pub async fn command(args: &[String]) -> Result<()> {
             }
             println!("{}", serde_json::to_string_pretty(&response)?);
         },
-        _ => anyhow::bail!("usage: --auth-enroll /absolute/config /absolute/state username | --auth-lock /absolute/state | --auth-status /absolute/state | --auth-operation-status /absolute/state operation-id | --auth-audit-archive /absolute/log /absolute/archive-directory | --auth-audit-init /absolute/directory"),
+        _ => anyhow::bail!("usage: --auth-operation-list | --auth-enroll /absolute/config /absolute/state username | --auth-lock /absolute/state | --auth-status /absolute/state | --auth-operation-status /absolute/state operation-id | --auth-audit-archive /absolute/log /absolute/archive-directory | --auth-audit-init /absolute/directory"),
     }
     Ok(())
 }

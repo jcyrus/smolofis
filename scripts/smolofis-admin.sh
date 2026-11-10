@@ -179,6 +179,11 @@ case "${1:-}" in
         exec /usr/local/bin/smolofis-panel --auth-enroll \
             /etc/smolofis/panel-auth.json /etc/smolofis/panel-enrollment.json "$2"
         ;;
+    console-operation-list)
+        [[ $# -eq 1 ]] || die "this command takes no additional arguments"
+        select_local_audit
+        exec /usr/local/bin/smolofis-panel --auth-operation-list
+        ;;
     console-operation-status)
         [[ $# -eq 2 ]] || die "usage: smolofis-admin console-operation-status operation-id"
         select_local_audit
@@ -218,7 +223,7 @@ case "${1:-}" in
         log "time zone is ${zone}; nightly backups now run around 03:00 local time"
         ;;
     *)
-        echo "usage: smolofis-admin provision|show|timezone <zone>|console-enroll <username>|console-status|console-lock|console-operation-status <operation-id>|console-access-check|console-audit-init|console-audit-archive" >&2
+        echo "usage: smolofis-admin provision|show|timezone <zone>|console-enroll <username>|console-status|console-lock|console-operation-status <operation-id>|console-operation-list|console-access-check|console-audit-init|console-audit-archive" >&2
         exit 2
         ;;
 esac

@@ -24,7 +24,8 @@ ACTION="${1:-status}"
 case "${ACTION}" in
     up|connect)
         log "connecting appliance to Tailscale (hostname: smolofis, tailscale SSH enabled)..."
-        tailscale up --ssh --hostname="smolofis" --accept-routes "${@:2}"
+        # Preserve appliance DNS managed by NetworkManager (and future directory DNS).
+        tailscale up --ssh --hostname="smolofis" --accept-dns=false --accept-routes "${@:2}"
         IP=$(tailscale ip -4 2>/dev/null || true)
         if [[ -n "${IP}" ]]; then
             log "connected successfully!"
@@ -44,7 +45,7 @@ case "${ACTION}" in
         KEY_FILE="$(mktemp)"
         trap 'rm -f "${KEY_FILE}"' EXIT
         printf '%s\n' "${KEY}" > "${KEY_FILE}"
-        tailscale up --auth-key="file:${KEY_FILE}" --hostname="smolofis" --ssh --accept-routes --timeout=60s
+        tailscale up --auth-key="file:${KEY_FILE}" --hostname="smolofis" --ssh --accept-dns=false --accept-routes --timeout=60s
         ;;
     down|disconnect)
         log "disconnecting from Tailscale..."
