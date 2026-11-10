@@ -249,6 +249,38 @@ fn local_audit(state: &Path, config: Option<&Path>) -> Result<Option<crate::audi
         .transpose()
 }
 
+fn prior_receipt(path: &Path, record: &Record) -> Result<Option<crate::audit::OperationReceipt>> {
+    let Some(expected) = &record.last_operation else {
+        return Ok(None);
+    };
+    let observed = read_record(path)?;
+    let receipt = observed
+        .last_operation
+        .context("current receipt missing during preservation")?;
+    anyhow::ensure!(
+        receipt.id == expected.id && receipt.operation == expected.operation,
+        "current receipt changed during preservation"
+    );
+    File::open(path)?.sync_all()?;
+    File::open(path.parent().context("state needs a parent")?)?.sync_all()?;
+    Ok(Some(receipt))
+}
+
+fn preserve_receipt(
+    receipt: Option<&crate::audit::OperationReceipt>,
+    audit: Option<&crate::audit::Audit>,
+) -> Result<()> {
+    if let (Some(receipt), Some(audit)) = (receipt, audit) {
+        audit.record_operation(
+            crate::audit::Event::LocalReceiptPreserved,
+            None,
+            receipt,
+            Some(crate::audit::LocalOutcome::Applied),
+        )?;
+    }
+    Ok(())
+}
+
 fn persist_enrollment(
     path: &Path,
     record: &Record,
@@ -264,6 +296,11 @@ fn persist_enrollment(
     let mut next = record.clone();
     next.version = 2;
     next.last_operation = Some(receipt.clone());
+    if audit.is_some() {
+        preserve_receipt(prior_receipt(path, record)?.as_ref(), audit).context(
+            "previous operation receipt could not be preserved; enrollment state unchanged",
+        )?;
+    }
     if let Some(audit) = audit {
         // Write-ahead authorization, not a claim that the state commit succeeded.
         audit.record_operation(
@@ -308,6 +345,11 @@ fn persist_lockdown(
     let mut next = record.clone();
     next.version = 2;
     next.last_operation = Some(receipt.clone());
+    let prior = if matches!(&audit, Ok(Some(_))) {
+        prior_receipt(path, record)
+    } else {
+        Ok(None)
+    };
     // Access removal must remain possible even with a broken/full audit file.
     if let Err(error) = write_record(path, &next) {
         if let Ok(Some(audit)) = &audit {
@@ -324,7 +366,10 @@ fn persist_lockdown(
         )));
     }
     (|| -> Result<()> {
+        let prior = prior?;
         if let Some(audit) = audit? {
+            // Lock first: journal availability must never delay access removal.
+            preserve_receipt(prior.as_ref(), Some(&audit))?;
             audit.record_operation(Event::LocalConsoleLocked, None, &receipt, Some(LocalOutcome::Applied))?;
         }
         Ok(())
@@ -350,8 +395,8 @@ pub async fn command(args: &[String]) -> Result<()> {
             let identity = crate::auth::verify_first_admin(Path::new(config), username, &password).await?;
             anyhow::ensure!(config_digest(Path::new(config))? == digest, "configuration changed while verifying; retry enrollment");
             anyhow::ensure!(machine_id_digest()? == machine, "appliance identity changed during enrollment");
-            let record = Record { version: 1, device_id: match previous { Some(record) => record.device_id, None => random_id()? }, machine_id_digest: machine,
-                generation: random_id()?, config_digest: digest, first_admin_guid: hex(&identity.0), locked: false, last_operation: None };
+            let record = Record { version: 1, device_id: match &previous { Some(record) => record.device_id.clone(), None => random_id()? }, machine_id_digest: machine,
+                generation: random_id()?, config_digest: digest, first_admin_guid: hex(&identity.0), locked: false, last_operation: previous.and_then(|record| record.last_operation) };
             let receipt = persist_enrollment(path, &record, &identity, audit.as_ref())?;
             println!("Operation {} applied.", receipt.id);
             println!("Enrollment saved. Set SMOLOFIS_AUTH_STATE to this file when starting the panel. Prior sessions using this enrollment are invalid. Restart if configuration changed.");
@@ -606,6 +651,41 @@ mod tests {
         drop(audit);
         fs::remove_dir_all(directory).unwrap();
     }
+    #[test]
+    fn unverified_previous_receipt_blocks_enrollment_but_cannot_prevent_lockdown() {
+        let (directory, mut record, audit) = audit_fixture();
+        let path = directory.join("state.json");
+        record.version = 2;
+        record.last_operation = Some(crate::audit::OperationReceipt {
+            id: "ab".repeat(32),
+            operation: crate::audit::LocalOperationKind::Enrollment,
+            outcome: crate::audit::LocalOutcome::Applied,
+        });
+        // No valid current state exists to substantiate this in-memory receipt.
+        let before = b"untrusted state";
+        fs::write(&path, before).unwrap();
+        assert!(persist_enrollment(
+            &path,
+            &record,
+            &crate::directory::Identity([7; 16]),
+            Some(&audit)
+        )
+        .is_err());
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert!(fs::read(directory.join("local.jsonl")).unwrap().is_empty());
+        record.locked = true;
+        let error = persist_lockdown(&path, &record, Ok(Some(audit))).unwrap_err();
+        assert!(error.to_string().contains("Console is locked"));
+        let saved: Record = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert!(
+            saved.locked
+                && saved.last_operation.unwrap().operation
+                    == crate::audit::LocalOperationKind::Lockdown
+        );
+        assert!(fs::read(directory.join("local.jsonl")).unwrap().is_empty());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn identifiers_are_unpredictable_and_state_shape_is_strict() {
         let a = random_id().unwrap();

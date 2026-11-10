@@ -29,6 +29,20 @@ verify() {
     grep -q '"source": "audit_history"' <<<"$historical"
     grep -q '"outcome": "applied"' <<<"$historical"
     grep -q '"directory_checked": false' <<<"$historical"
+    # The previous nightly can prepare/check byte persistence but cannot decode
+    # the new event. Candidate-image verification must exercise the new reader.
+    if [[ "${1:-full}" != baseline ]]; then
+        local checkpoint listing
+        checkpoint="$EVIDENCE/receipt-checkpoint.jsonl"
+        [[ "$(stat -c '%a:%u:%h' "$checkpoint")" == 400:0:1 ]]
+        historical="$(SMOLOFIS_LOCAL_AUDIT_FILE="$checkpoint" smolofis-admin console-operation-status "$(cat "$EVIDENCE/operation-id")")"
+        grep -q '"source": "audit_history"' <<<"$historical"
+        grep -q '"outcome": "applied"' <<<"$historical"
+        listing="$(SMOLOFIS_LOCAL_AUDIT_FILE="$checkpoint" smolofis-admin console-operation-list)"
+        grep -Fq "$(cat "$EVIDENCE/operation-id")" <<<"$listing"
+        grep -q '"outcome": "applied"' <<<"$listing"
+        echo 'PASS: protected checkpoint-only history is readable by the candidate'
+    fi
     echo 'PASS: locked enrollment receipt, live log and protected archive preserved'
 }
 
@@ -58,8 +72,15 @@ case "${1:-}" in
         [[ "$digest" == "$(sha256sum "$archive" | cut -d' ' -f1)" ]]
         printf '%s\n' "$archive" > "$EVIDENCE/archive-path"
         printf '%s\n' "$operation" > "$EVIDENCE/operation-id"
-        sha256sum /etc/machine-id /etc/smolofis/identity/machine-id "$STATE" "$BASE/events.jsonl" "$archive" "$manifest" > "$EVIDENCE/hashes"
-        verify
+        # Synthetic test-only history, prepared even on an older nightly. Native
+        # tests exercise real checkpoint emission; this fixture tests the new
+        # reader across installed-image updates/fallback without enabling access.
+        checkpoint="$EVIDENCE/receipt-checkpoint.jsonl"
+        printf '{"version":1,"timestamp_ms":0,"event":"local_receipt_preserved","actor_guid":null,"actor_uid":0,"operation_id":"%s","operation":"lockdown","outcome":"applied"}\n' "$operation" > "$checkpoint"
+        chmod 0400 "$checkpoint"
+        sha256sum /etc/machine-id /etc/smolofis/identity/machine-id "$STATE" "$BASE/events.jsonl" "$archive" "$manifest" "$checkpoint" > "$EVIDENCE/hashes"
+        sync
+        verify baseline
         ;;
     verify) verify ;;
     *) echo 'usage: verify-audit-lifecycle.sh prepare|verify' >&2; exit 2 ;;

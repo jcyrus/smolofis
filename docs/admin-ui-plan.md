@@ -5,8 +5,8 @@ Rust/Axum/Askama panel. Primary tasks: people and groups, shared folders, and
 service diagnosis. Central identities apply to hosted services; employee
 computer sign-in is deferred.
 
-Current production status (2026-11-09): `192.168.1.17` runs dev.78 on active
-system-a. Administration remains disabled; system-b/dev.73 is retained.
+Current production status (2026-11-10): `192.168.1.17` runs dev.80 on active
+system-b. Administration remains disabled; system-a/dev.78 is retained.
 
 Update this file with evidence as work completes. A checked milestone means
 its acceptance criteria have passed, not merely that code exists.
@@ -326,4 +326,29 @@ failures and never log credentials.
 
 - [x] Implement root-only selected-file `console-operation-list` preview: protected bounded snapshot, 4096-operation cap, consistent completion validation, lexical IDs, unknown outcomes and explicit partial-tail status.
 - [x] Validate operation listing through the packaged wrapper on native Linux: eight checks passed for standard-log discovery, read-only archive overrides, retained real crash/unknown outcomes, busy locks, ownership/mode/links, malformed/orphan records, size/missing/empty history, non-root/argument denial and unchanged bytes. Private evidence: `operation-listing-0ec98ed3f7` (2026-11-10).
-- [ ] Review and publish operation-listing and DNS-helper changes through CI. Archive discovery/pagination and complete operation journaling remain open.
+- [x] Review and publish operation-listing and DNS-helper changes through PR #23/main CI and dev.80 rollout, recorded below. Archive discovery/pagination and complete operation journaling remain open.
+
+- [x] Open draft [PR #23](https://github.com/jcyrus/smolofis/pull/23) at `278cf0c` for operation listing, DNS-preserving connection defaults and retained lab evidence. Local validation: 71 Rust tests passed, one manual fixture ignored; Clippy/formatting/ShellCheck/Python checks passed. Full [CI run 42759101013](https://github.com/jcyrus/smolofis/actions/runs/42759101013) was queued on 2026-11-10.
+- [x] Verify [PR #23 CI run 42759101013](https://github.com/jcyrus/smolofis/actions/runs/42759101013) completed successfully on the latest PR head `278cf0c8e3c9d95b8123cf37c3637004995a628d`: compile/lint/advisories/unit tests, ISO assembly, QEMU smoke, BIOS and UEFI install/reboot acceptance all passed. CodeRabbit status is successful. Release publication was skipped for the draft PR (2026-11-10).
+- [x] Mark PR #23 ready and merge the tested head as `bdc0e9f5bf2aa5a7f7c8557b9380187bcbcdda10` (2026-11-10).
+- [x] Verify [main CI/publication run 42767153841](https://github.com/jcyrus/smolofis/actions/runs/42767153841) passed all six jobs, including BIOS/UEFI installation and release publication. Signed nightly `0.1.0-dev.80` published from merge `bdc0e9f5bf2aa5a7f7c8557b9380187bcbcdda10`; nightly tag matches that commit (2026-11-10).
+- [x] Download dev.80 manifest/signature/checksum sidecar and verify against `config/release/allowed_signers`. Signed ISO SHA256 `94ac377cf64fe94fd555088884aef2d3fc899ddbd887b9c5062b8842b711bd14` matches the sidecar and GitHub asset digest; ISO size 962904064 bytes. Full ISO download/hash remains part of server staging.
+- [x] Upgrade production to dev.80 using the pinned signed ISO, full downloaded SHA256 verification and fresh readable backup `20261110T072254Z`. System-b promoted after ready; system-a/dev.78 retained. Boot ID `fba54147-5879-4e24-9aa5-9fa60256568c`; both machine-ID hashes unchanged, no failed units, healthy core services, persisted Coolify user, public dashboard 200 and admin/login/assets 404. Candidate admin units and enrollment remain absent. Staging/evidence: `/var/lib/smolofis/dev80-stage.VIug5A/` (2026-11-10).
+- [ ] Validate Tailscale DNS preference durability after actual enrollment: the unjoined node reset `CorpDNS` to true across reboot despite a persistent state directory. Reapplied false live; installed dev.80 manual/autoconnect helper explicitly passes `--accept-dns=false`. Connected acceptance remains pending; node still `NeedsLogin`, Serve empty.
+
+### Durable receipt journal follow-up — 2026-11-10
+
+- [x] Implement typed root `local_receipt_preserved` checkpoints from validated and synced current state. Enrollment checkpoints before replacing access; lockdown commits access removal first and reports any subsequent journal failure. Busy checkpoints fail without waiting. Known-ID lookup and listing retain preserved applied outcomes after superseding actions.
+- [x] Host validation: 73 tests passed, one manual browser fixture ignored; Clippy, formatting, Python compilation and whitespace checks passed.
+- [x] Eight native full-kernel VM checks passed: real SIGXFSZ completion crash, explicit tail archival and superseded receipt recovery, repeated preservation, busy/corrupt journal lockdown behavior, real LDAPS enrollment refusal/recovery ordering, foreign-state/non-root refusal and synthetic-account cleanup. Evidence: `receipt-journal-a7dbfc18d1` (2026-11-10).
+- [x] Native lockdown checkpoint fault/reader acceptance: 16 checks passed (baseline sync order, EIO at all six fsync/fdatasync calls, eight SIGKILL boundaries, and read-only pre-checkpoint binary compatibility). Evidence: `receipt-faults-13f87514ee`. State/parent and audit flush calls were actually traced; older history lookup reports unknown/unavailable and preserves bytes (2026-11-10).
+- [x] Native enrollment fault acceptance: 19 checks passed using real verified LDAPS (seven-sync baseline, EIO at all seven calls, eleven SIGKILL boundaries), preserving locked state before replacement and honest uncertainty afterward. Synthetic directory user/group removed; enrollment password supplied by pipe. Evidence: `enrollment-faults-c028bd2b2b` (2026-11-10).
+- [x] Shared lab-only tracer regression: all 16 lockdown/older-reader checks passed again after extraction to `receipt_fault_tools.py`; evidence `receipt-faults-1d0423355e` (2026-11-10).
+- [ ] Validate complete appliance A/B upgrade/rollback with checkpoint-bearing history and physical storage durability before broader guarantees; review/publish checkpoint code via CI. Emergency lockdown deliberately retains a crash window between access removal and prior-receipt checkpointing.
+- [ ] General queued/running operation journal/executor, privileged worker mutations, HTTP integration and archive discovery remain unfinished. This checkpoint work does not complete M1.
+
+### Checkpoint appliance lifecycle fixture — 2026-11-10
+
+- [x] Extend installed-image acceptance with protected synthetic checkpoint-only history and its hash. Previous-nightly preparation verifies legacy history/bytes; upgraded candidate must resolve the superseded ID and list the checkpoint. Existing signed-update promotion and corrupted-slot rollback checks both enforce it; administration stays locked/disabled.
+- [x] Five native lifecycle fixture component checks passed: previous-reader preparation/new-reader verification, QEMU/KVM guard with unsupported-VM refusal, overwrite refusal, changed state detection and changed checkpoint detection. Evidence: `audit-workflow-3e920e666c`. Private mounts/configuration cleaned on namespace exit; actual A/B boots remain CI work.
+- [ ] Review and submit checkpoint implementation/acceptance helpers; pass full ISO CI including signed A/B upgrade and corrupted-slot fallback before publishing. Reader downgrade is covered separately; these tests do not authorize older mutation writers.

@@ -82,7 +82,14 @@ sample = {'version': 1, 'timestamp_ms': int(time.time() * 1000),
           'event': 'local_enrollment_authorized', 'actor_guid': initial['first_admin_guid'],
           'actor_uid': 0, 'operation_id': '0' * 64, 'operation': 'enrollment'}
 authorization_bytes = len(json.dumps(sample, separators=(',', ':')).encode()) + 1
-result = command('--auth-enroll', limit=16384 + authorization_bytes + 1)
+# Re-enrollment now durably checkpoints the previous receipt before authorizing
+# a replacement. Allow that complete record before crashing the new completion.
+checkpoint = {'version': 1, 'timestamp_ms': sample['timestamp_ms'],
+              'event': 'local_receipt_preserved', 'actor_guid': None, 'actor_uid': 0,
+              'operation_id': locked['last_operation']['id'], 'operation': 'lockdown',
+              'outcome': 'applied'}
+checkpoint_bytes = len(json.dumps(checkpoint, separators=(',', ':')).encode()) + 1
+result = command('--auth-enroll', limit=16384 + checkpoint_bytes + authorization_bytes + 1)
 assert result.returncode == -signal.SIGXFSZ
 after_crash = status()
 crashed = after_crash['last_operation']

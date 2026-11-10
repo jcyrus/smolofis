@@ -21,6 +21,7 @@ pub enum Event {
     LocalConsoleLocked,
     LocalEnrollmentApplied,
     LocalOperationUncertain,
+    LocalReceiptPreserved,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -169,6 +170,16 @@ fn parse_operation_records<'a>(
                 );
                 applied = true;
             }
+            (Event::LocalReceiptPreserved, _, Some(LocalOutcome::Applied)) => {
+                anyhow::ensure!(
+                    record.actor_guid.is_none(),
+                    "receipt preservation must use root attribution"
+                );
+                // A root checkpoint of validated, synced current state can resolve
+                // an earlier missing/uncertain completion, including after archival.
+                applied = true;
+                uncertain = false;
+            }
             (Event::LocalOperationUncertain, _, Some(LocalOutcome::Unknown)) => {
                 anyhow::ensure!(!applied, "uncertainty conflicts with applied outcome");
                 uncertain = true;
@@ -264,6 +275,7 @@ fn parse_listing(bytes: &[u8]) -> Result<OperationListing> {
                 !matches!(
                     record.event,
                     Event::LocalEnrollmentAuthorized
+                        | Event::LocalReceiptPreserved
                         | Event::LocalEnrollmentApplied
                         | Event::LocalConsoleLocked
                         | Event::LocalOperationUncertain
@@ -395,13 +407,18 @@ impl Audit {
                     Event::LocalConsoleLocked,
                     LocalOperationKind::Lockdown,
                     Some(LocalOutcome::Applied),
-                ) | (
-                    Event::LocalOperationUncertain,
-                    _,
-                    Some(LocalOutcome::Unknown)
-                )
+                ) | (Event::LocalReceiptPreserved, _, Some(LocalOutcome::Applied))
+                    | (
+                        Event::LocalOperationUncertain,
+                        _,
+                        Some(LocalOutcome::Unknown)
+                    )
             ),
             "invalid local audit event"
+        );
+        anyhow::ensure!(
+            !matches!(event, Event::LocalReceiptPreserved) || identity.is_none(),
+            "receipt preservation requires root attribution"
         );
         self.append(event, identity, Some(0), Some((receipt, outcome)))
     }
@@ -429,7 +446,12 @@ impl Audit {
             .0
             .lock()
             .map_err(|_| anyhow::anyhow!("audit lock poisoned"))?;
-        file.lock()?;
+        if matches!(event, Event::LocalReceiptPreserved) {
+            file.try_lock()
+                .map_err(|_| anyhow::anyhow!("receipt journal is busy"))?;
+        } else {
+            file.lock()?;
+        }
         let result = (|| -> Result<()> {
             if let Some(identity) = &self.1 {
                 identity.verify(&file)?;
@@ -581,6 +603,47 @@ mod tests {
                 .as_bytes(),
         );
         assert!(parse_listing(&bytes).is_err());
+    }
+
+    #[test]
+    fn preserved_receipt_resolves_missing_completion_without_inventing_authorization() {
+        let mut row: serde_json::Value = serde_json::from_slice(&history_event(
+            "local_console_locked",
+            "lockdown",
+            Some("applied"),
+        ))
+        .unwrap();
+        row["event"] = serde_json::json!("local_receipt_preserved");
+        row["operation"] = serde_json::json!("enrollment");
+        let checkpoint = format!("{}\n", row).into_bytes();
+        let parsed = parse_history(&checkpoint, &"ab".repeat(32)).unwrap();
+        assert_eq!(parsed.outcome, LocalOutcome::Applied);
+        assert_eq!(
+            parse_listing(&checkpoint).unwrap().operations[0].outcome,
+            LocalOutcome::Applied
+        );
+        let mut pending = history_event("local_enrollment_authorized", "enrollment", None);
+        pending.extend(history_event(
+            "local_operation_uncertain",
+            "enrollment",
+            Some("unknown"),
+        ));
+        assert_eq!(
+            parse_history(&pending, &"ab".repeat(32)).unwrap().outcome,
+            LocalOutcome::Unknown
+        );
+        pending.extend(&checkpoint);
+        assert_eq!(
+            parse_history(&pending, &"ab".repeat(32)).unwrap().outcome,
+            LocalOutcome::Applied
+        );
+        row["actor_uid"] = serde_json::json!(1000);
+        assert!(parse_listing(format!("{}\n", row).as_bytes()).is_err());
+        row["actor_uid"] = serde_json::json!(0);
+        row["actor_guid"] = serde_json::json!("07".repeat(16));
+        assert!(parse_listing(format!("{}\n", row).as_bytes()).is_err());
+        let orphan = history_event("local_enrollment_applied", "enrollment", Some("applied"));
+        assert!(parse_history(&orphan, &"ab".repeat(32)).is_err());
     }
 
     fn history_event(event: &str, kind: &str, outcome: Option<&str>) -> Vec<u8> {

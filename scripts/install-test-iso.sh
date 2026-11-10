@@ -621,7 +621,7 @@ wait_ready "after restoring app data"
 log "PASS  backup and restore cover deployed apps' data"
 
 # A locked synthetic enrollment exercises persistent schema-v2 receipts and
-# archived history without configuring directory access or enabling the console.
+# archived/checkpoint-only history without configuring directory access or enabling the console.
 guest "$FINAL_PASSWORD" "sudo bash -s prepare" \
   < "$(dirname "$0")/dev/identity/verify-audit-lifecycle.sh" \
   || die "could not prepare audit lifecycle fixture"
@@ -674,7 +674,7 @@ log "PASS  update booted and was promoted to the active slot"
 guest "$FINAL_PASSWORD" "sudo bash -s verify" \
   < "$(dirname "$0")/dev/identity/verify-audit-lifecycle.sh" \
   || die "audit history or enrollment changed across signed update"
-log "PASS  audit history and locked schema-v2 enrollment survive signed update"
+log "PASS  audit/checkpoint history and locked schema-v2 enrollment survive signed update"
 assert_administration_disabled
 
 
@@ -695,7 +695,7 @@ wait_ready "after the rollback"
 guest "$FINAL_PASSWORD" "sudo bash -s verify" \
   < "$(dirname "$0")/dev/identity/verify-audit-lifecycle.sh" \
   || die "audit history or enrollment changed across rollback"
-log "PASS  audit history and locked schema-v2 enrollment survive rollback"
+log "PASS  audit/checkpoint history and locked schema-v2 enrollment survive rollback"
 assert_administration_disabled
 
 support_rc=0

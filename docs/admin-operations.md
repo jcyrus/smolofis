@@ -313,3 +313,216 @@ python3 scripts/dev/identity/vm/lab.py check-operation-listing
 ```
 
 Release CI/publication remains pending. Production binary is unchanged.
+
+## Operation-listing release — 2026-11-10
+
+PR #23 merged as `bdc0e9f5bf2aa5a7f7c8557b9380187bcbcdda10`.
+[Main run 42767153841](https://github.com/jcyrus/smolofis/actions/runs/42767153841)
+passed compilation/lint/advisories/unit tests, ISO assembly, smoke, BIOS/UEFI
+installation and publication. Nightly dev.80 contains the root listing command,
+DNS-preserving connection defaults and retained acceptance helpers/documentation.
+The nightly tag matches the merge commit.
+
+The downloaded manifest verifies against the repository release signer. ISO hash
+`94ac377cf64fe94fd555088884aef2d3fc899ddbd887b9c5062b8842b711bd14`
+agrees across the signed manifest, checksum sidecar and GitHub asset digest.
+This metadata verification does not replace downloading/hashing the complete ISO
+before staging an upgrade. No production upgrade was performed; production
+remains dev.78 with administration disabled.
+
+## Production dev.80 rollout — 2026-11-10
+
+The authorized rollout downloaded the full pinned ISO to
+`/var/lib/smolofis/dev80-stage.VIug5A/`, verified its signature against the
+server's trusted signer and matched SHA256
+`94ac377cf64fe94fd555088884aef2d3fc899ddbd887b9c5062b8842b711bd14`.
+The installed updater created backup `20261110T072254Z`; every tar archive
+listed successfully and the PostgreSQL dump passed `pg_restore --list`.
+This establishes readability, not restore acceptance.
+
+Updater staging succeeded, followed by an authorized reboot. Dev.80 reached
+ready and system-b was promoted; system-a/dev.78 is retained. Kernel boot ID
+changed to `fba54147-5879-4e24-9aa5-9fa60256568c`. Runtime and saved machine-ID
+hashes match their pre-upgrade values. No failed units remain; Docker, panel,
+infrastructure and SSH are active. Core containers recovered, Gitea reports
+28.2.0, Coolify retains one user and the public dashboard returns 200.
+
+Console/login and actual `/assets/console.css` and `/assets/console.js` routes
+return 404. Candidate worker/backend/HTTPS units, auth configuration and
+enrollment remain absent; no 8091 or SMB 445 listener is present. The newly
+installed listing CLI correctly refuses an unconfigured audit file.
+
+Tailscale remains unjoined (`NeedsLogin`) and Serve is empty. Its state directory
+is on persistent ext4, but the disconnected node's live `CorpDNS=false` preference
+reset on reboot; it was reapplied without joining. The installed dev.80
+connection/autoconnect helper explicitly supplies `--accept-dns=false`.
+Do not claim durable connected DNS acceptance from this unjoined-node change;
+verify after enrollment. The earlier resolve1 warning remains in stopped-node
+health. Production administration was not enabled.
+
+## Preserving superseded receipts — implementation preview
+
+Before a configured-audit enrollment replaces the current state, it validates
+and syncs the previous state/parent and appends a synced
+`local_receipt_preserved` event for that state's applied receipt. This is root
+attribution of observed state, not a reconstructed directory authorization.
+Known-ID lookup and operation listing recognize this checkpoint as applied,
+including when the original completion is missing or its log was archived.
+No begin event alone is promoted, and no arbitrary operation ID is accepted
+from a caller for preservation. Existing command serialization covers the state
+observation, checkpoint and subsequent mutation.
+
+Enrollment fails before changing access when prior-receipt verification or
+checkpoint persistence fails. Lockdown keeps its access-removal priority:
+it captures the validated previous receipt, commits the locked state first,
+then checkpoints that receipt and writes its own completion. A busy checkpoint
+fails without waiting on the audit lock. Journal failures are reported after
+lockdown rather than preventing access removal. If the process crashes after
+lockdown commits but before checkpoint persistence, the earlier outcome can
+still remain unknown; the new lockdown receipt remains in state. This exception
+is deliberate and must not be described as eliminating all crash windows.
+
+A partial log tail still requires explicit archival; checkpointing never repairs
+or truncates it. When auditing is not configured, legacy local commands retain
+their latest-receipt behavior without historical guarantees. No worker mutations,
+HTTP history API, general queued/running operation executor, automatic archive
+search, or restored-device reconciliation is introduced by this preview.
+
+Older binaries do not understand the new typed event and can report audit
+history unavailable. Keep the new reader for checkpoint-bearing histories;
+validate upgrade/rollback handling before enabling production administration.
+Production remains dev.80 and has not received this implementation.
+
+Validation: 73 host tests passed (one manual browser fixture ignored) and Clippy,
+formatting/Python/whitespace checks passed. Eight native Linux checks passed,
+including a real SIGXFSZ completion-write crash, explicit partial-tail archival,
+superseded receipt lookup, repeated preservation, busy/damaged journal lockdown,
+real LDAPS enrollment refusal and recovery ordering, foreign-state/non-root
+refusal, and cleanup of the synthetic directory user/group. Report:
+`/var/lib/smolofis-identity-machine-lab/receipt-journal-a7dbfc18d1/report.json`.
+Reproduce with the reviewed Linux candidate in
+`work/identity-m0-vm/panel-journal`:
+
+```sh
+python3 scripts/dev/identity/vm/lab.py check-receipt-preservation
+```
+
+Checkpoint fsync fault injection, individual checkpoint crash boundaries,
+appliance upgrade/rollback compatibility and release CI remain pending.
+No production configuration or binary changed during these tests.
+
+### Native checkpoint fault and older-reader acceptance — 2026-11-10
+
+Sixteen checks passed using the existing candidate binary in the owned x86_64
+full-kernel VM. The tracer observed this lockdown sequence:
+
+1. `fsync` of the validated previous state.
+2. `fsync` of its parent directory.
+3. `fsync` of the new locked-state temporary file.
+4. `fsync` of the parent after state replacement.
+5. `fdatasync` of the previous-receipt checkpoint.
+6. `fdatasync` of lockdown completion.
+
+Real `EIO` was injected into each sync syscall. Failures before the new state
+file sync preserved the old state or allowed lockdown with explicit partial
+failure, depending on the phase. A state-directory sync failure left a visible
+replacement with an uncertain command result. Checkpoint/completion sync failures
+returned an error while preserving the already-committed locked state. Complete
+records can remain visible after an injected flush failure; visibility is not a
+claim of durability under physical power loss.
+
+Child processes were killed before all six sync calls and after checkpoint and
+completion sync. Fresh processes could inspect the resulting state. After a
+successful checkpoint sync, the older applied receipt remained discoverable
+from journal history even after its current-state receipt was superseded.
+The known lockdown interval between state commit and checkpoint remains explicit;
+these tests neither erase that interval nor invent historical completion.
+
+The pre-checkpoint candidate's SHA256 was matched to its retained native-listing
+report before testing a private executable copy. It read current schema-v2
+receipts, but unsupported checkpoint history returned `unknown` with audit status
+`unavailable`; state and log bytes were unchanged. No old mutation command ran.
+This is reader compatibility acceptance, not complete appliance rollback
+acceptance, restored-session acceptance, or permission to run older writers on
+checkpoint-bearing history.
+
+Private report:
+`/var/lib/smolofis-identity-machine-lab/receipt-faults-13f87514ee/report.json`.
+The initial baseline harness omitted `fdatasync`; the final run covers both
+sync syscalls. No product fault-injection hook was added. Reproduce after
+receipt-preservation setup:
+
+```sh
+python3 scripts/dev/identity/vm/lab.py check-receipt-faults
+```
+
+Full A/B upgrade/rollback, enrollment-specific sync/crash coverage and hardware
+power-loss durability remain separate acceptance. Production was unchanged.
+
+### Enrollment-specific sync/crash acceptance — 2026-11-10
+
+Nineteen checks passed in the full-kernel x86_64 VM using real
+certificate-verified Samba LDAPS and a disposable dedicated administrator.
+The baseline established seven sync calls in this order:
+
+1. Previous state `fsync`.
+2. Previous state parent `fsync`.
+3. Prior-receipt checkpoint `fdatasync`.
+4. New enrollment authorization `fdatasync`.
+5. Replacement state temporary-file `fsync`.
+6. Replacement state parent-directory `fsync`.
+7. Completion event `fdatasync`.
+
+Injected `EIO` at each call preserved the original locked state through phase 5.
+After state replacement, phase 6 returned explicit uncertainty; phase 7 reported
+that state was applied but completion auditing failed. Fresh history listing
+kept authorization-only/uncertain operations unknown rather than inventing
+completion. No success message was accepted on error. LDAP connection-close
+warnings may appear on stdout independently of command success; the harness
+checks results and state rather than assuming every warning is a failure.
+
+The child was killed before each of the seven sync calls and after phases 3,
+4, 6 and 7. Original locked state remained until replacement; visible replacement
+state had its own receipt. When later access was applied, the prior checkpoint
+retained the old lockdown outcome. These are process-level tests on a running
+kernel, not device-cache or host power-loss proofs.
+
+Enrollment passwords flowed through a pipe to the child and were absent from
+enrollment argv and reports. The synthetic directory user/group and private
+reader-password fixture were removed. Source configuration in the private
+evidence directory references that removed fixture and is not a running panel.
+No production state or binary changed.
+
+Evidence:
+`/var/lib/smolofis-identity-machine-lab/enrollment-faults-c028bd2b2b/report.json`.
+The shared fault tracer is a lab-only Python module, not product code. Its
+refactor passed the complete 16-check lockdown/older-reader matrix again at
+`receipt-faults-1d0423355e`. Reproduce after staging the journal candidate:
+
+```sh
+python3 scripts/dev/identity/vm/lab.py check-enrollment-faults
+python3 scripts/dev/identity/vm/lab.py check-receipt-faults
+```
+
+Full appliance A/B upgrade/rollback with the checkpoint event and release CI
+remain pending. Production remains dev.80 with administration disabled.
+
+### Installed-image checkpoint fixture — 2026-11-10
+
+The existing ISO install test now carries a mode-0400 synthetic checkpoint-only
+history alongside its real archived lockdown history. The checkpoint's ID was
+superseded in current state, so candidate lookup must use the selected history.
+Its bytes are included in the persisted SHA256 set. Previous-nightly preparation
+checks legacy history and hashes only; candidate verification additionally
+requires checkpoint lookup and listing. Both post-promotion and corrupted-slot
+fallback verification enforce the new reader. The fixture is synthetic and
+locked; it does not configure a directory or expose administration. Actual
+checkpoint emission and fault handling have their separate native acceptance.
+
+Five component checks passed in a private native-VM mount namespace, using the
+verified pre-checkpoint binary for preparation and the new binary for reading.
+They include QEMU/KVM/unsupported-runtime checks, overwrite refusal, and changed
+state/checkpoint byte detection. Evidence:
+`/var/lib/smolofis-identity-machine-lab/audit-workflow-3e920e666c/report.json`.
+Fixture mounts/configuration disappeared with namespace exit. This component
+run is not complete A/B boot acceptance; full ISO CI remains pending.
