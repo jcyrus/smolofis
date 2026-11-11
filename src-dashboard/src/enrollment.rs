@@ -101,7 +101,7 @@ fn read_record(path: &Path) -> Result<Record> {
     Ok(record)
 }
 
-fn machine_id_digest() -> Result<String> {
+pub(crate) fn machine_id_digest() -> Result<String> {
     let path = Path::new("/etc/machine-id");
     trusted(path, false, 0)?;
     let id = fs::read_to_string(path).context("read appliance machine-id")?;

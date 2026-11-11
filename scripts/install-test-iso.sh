@@ -675,6 +675,10 @@ guest "$FINAL_PASSWORD" "sudo bash -s verify" \
   < "$(dirname "$0")/dev/identity/verify-audit-lifecycle.sh" \
   || die "audit history or enrollment changed across signed update"
 log "PASS  audit/checkpoint history and locked schema-v2 enrollment survive signed update"
+guest "$FINAL_PASSWORD" "sudo bash -s recover-journal" \
+  < "$(dirname "$0")/dev/identity/verify-audit-lifecycle.sh" \
+  || die "operation journal recovery/execution failed after signed update"
+log "PASS  operation journal recovers interrupted work and completes fresh identity check"
 assert_administration_disabled
 
 

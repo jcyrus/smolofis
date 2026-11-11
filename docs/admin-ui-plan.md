@@ -5,8 +5,8 @@ Rust/Axum/Askama panel. Primary tasks: people and groups, shared folders, and
 service diagnosis. Central identities apply to hosted services; employee
 computer sign-in is deferred.
 
-Current production status (2026-11-10): `192.168.1.17` runs dev.80 on active
-system-b. Administration remains disabled; system-a/dev.78 is retained.
+Current production status (2026-11-11): `192.168.1.17` runs dev.82 on active
+system-a. Administration remains disabled; system-b/dev.80 is retained.
 
 Update this file with evidence as work completes. A checked milestone means
 its acceptance criteria have passed, not merely that code exists.
@@ -344,11 +344,28 @@ failures and never log credentials.
 - [x] Native lockdown checkpoint fault/reader acceptance: 16 checks passed (baseline sync order, EIO at all six fsync/fdatasync calls, eight SIGKILL boundaries, and read-only pre-checkpoint binary compatibility). Evidence: `receipt-faults-13f87514ee`. State/parent and audit flush calls were actually traced; older history lookup reports unknown/unavailable and preserves bytes (2026-11-10).
 - [x] Native enrollment fault acceptance: 19 checks passed using real verified LDAPS (seven-sync baseline, EIO at all seven calls, eleven SIGKILL boundaries), preserving locked state before replacement and honest uncertainty afterward. Synthetic directory user/group removed; enrollment password supplied by pipe. Evidence: `enrollment-faults-c028bd2b2b` (2026-11-10).
 - [x] Shared lab-only tracer regression: all 16 lockdown/older-reader checks passed again after extraction to `receipt_fault_tools.py`; evidence `receipt-faults-1d0423355e` (2026-11-10).
-- [ ] Validate complete appliance A/B upgrade/rollback with checkpoint-bearing history and physical storage durability before broader guarantees; review/publish checkpoint code via CI. Emergency lockdown deliberately retains a crash window between access removal and prior-receipt checkpointing.
+- [x] Complete checkpoint-bearing appliance signed A/B upgrade/fallback acceptance through PR #24 and main CI, and publish dev.82, recorded below. Physical storage durability remains pending under M1. Emergency lockdown retains the documented interval between access removal and prior-receipt checkpointing.
 - [ ] General queued/running operation journal/executor, privileged worker mutations, HTTP integration and archive discovery remain unfinished. This checkpoint work does not complete M1.
 
 ### Checkpoint appliance lifecycle fixture — 2026-11-10
 
 - [x] Extend installed-image acceptance with protected synthetic checkpoint-only history and its hash. Previous-nightly preparation verifies legacy history/bytes; upgraded candidate must resolve the superseded ID and list the checkpoint. Existing signed-update promotion and corrupted-slot rollback checks both enforce it; administration stays locked/disabled.
 - [x] Five native lifecycle fixture component checks passed: previous-reader preparation/new-reader verification, QEMU/KVM guard with unsupported-VM refusal, overwrite refusal, changed state detection and changed checkpoint detection. Evidence: `audit-workflow-3e920e666c`. Private mounts/configuration cleaned on namespace exit; actual A/B boots remain CI work.
-- [ ] Review and submit checkpoint implementation/acceptance helpers; pass full ISO CI including signed A/B upgrade and corrupted-slot fallback before publishing. Reader downgrade is covered separately; these tests do not authorize older mutation writers.
+- [x] Open draft [PR #24](https://github.com/jcyrus/smolofis/pull/24) at `9369bd314eddc867acb24e8b3c648944c3c1e973` with checkpoint implementation and native/installed-image acceptance. Local validation: 73 host tests passed, one ignored; Clippy, formatting, ShellCheck, Python syntax and staged whitespace checks passed (2026-11-10).
+- [x] Verify [PR #24 CI run 42800140945](https://github.com/jcyrus/smolofis/actions/runs/42800140945) passed on latest head `9369bd314eddc867acb24e8b3c648944c3c1e973`: compile/lint/advisories/unit/Python checks, ISO assembly, smoke, BIOS and UEFI installation. Both firmware logs explicitly confirm checkpoint-only history readability after signed update promotion and corrupted-slot fallback. Publication skipped for draft PR (2026-11-10).
+- [x] PR #24 merged as `a2f3da08afcebdb5b4be4345a6c3f588dc747f29` on 2026-11-10; merge confirmed via GitHub.
+- [x] Verify [main CI/publication run 42840650291](https://github.com/jcyrus/smolofis/actions/runs/42840650291) passed all six jobs on merge `a2f3da08afcebdb5b4be4345a6c3f588dc747f29`, including BIOS/UEFI tests and release publication. Nightly dev.82 published; downloaded manifest signature verifies against the release signer. Signed ISO hash `d7e4435b0eb2e2cbc845f2267982180f32147ce8a86c61dc8d300266509288c1` matches the checksum sidecar and GitHub asset digest. Full ISO download/hash verification remains part of staging. Older-version writers and hardware power-loss durability retain separate limits.
+- [x] Deploy dev.82 on 2026-11-11 using the installed updater, trusted manifest signature and full downloaded ISO hash `d7e4435b0eb2e2cbc845f2267982180f32147ce8a86c61dc8d300266509288c1`. Fresh backup `20261111T032720Z` tar archives and PostgreSQL dump listed successfully. System-a promoted after ready; system-b/dev.80 retained. Boot ID `f2183338-7718-412d-8f62-2339ccfac5f7`, machine-ID hashes unchanged, no failed units, healthy core containers and persisted Coolify user. Console/login/assets return 404 and candidate admin units/configuration remain absent. Tailscale `NeedsLogin`, Serve empty. Evidence `/var/lib/smolofis/dev82-stage.UNJR3R/`.
+
+### General operation journal preview — 2026-11-11
+
+- [x] Implement root-command journal initialization, listing, status and execution with machine binding, protected files, serialized access and atomic synced snapshots. Records carry queued/running/succeeded/failed/unknown transitions and typed root attribution. First executable kind checks runtime/saved machine identity.
+- [x] Explicit recovery marks queued/running work unknown/interrupted, preserves terminal results and allows a new operation ID afterward. Terminal rewrites and new work during unfinished operations are refused. Store is bounded to 256 operations and 1 MiB.
+- [x] Host validation: 76 tests passed, one manual fixture ignored. Clippy, formatting, ShellCheck and Python syntax checks passed. Final native acceptance passed 19 checks for packaged commands/listing, real identity success/failure, concurrency/root/ID guards, foreign/corrupt/unsafe stores, EIO at six sync calls and nine process-crash boundaries. Evidence: `operation-journal-56088655dc`.
+- [ ] Review/publish the journal preview through CI and validate its own installed-image persistence/rollback. Worker/API integration, directory actor attribution, additional mutation kinds, retention/export and UI integration remain pending. Production remains dev.82 with administration disabled.
+
+### General journal lifecycle and review — 2026-11-11
+
+- [x] Extend the installed-image fixture with synthetic completed/running journal records and protected hashes. After signed promotion, verify persistence, recover the interrupted record, preserve the completed result, and execute a fresh identity check. Verify the resulting journal after failed-slot rollback.
+- [x] Seven native lifecycle component checks passed using previous-binary preparation and candidate verification, with changed-journal detection, recovery/execution and fixture overwrite guards. Evidence: `audit-workflow-c13c76d582`. Actual A/B boots await full ISO CI.
+- [ ] Submit the reviewed journal and lifecycle changes and pass full ISO CI before merge/publication. Production remains dev.82 with administration disabled.

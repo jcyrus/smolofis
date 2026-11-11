@@ -185,6 +185,24 @@ def main():
         with Path(__file__).with_name('verify-audit-archive.py').open('rb') as source:
             run(ssh_args()+['sudo -n tee /opt/smolofis-identity-lab/vm/verify-audit-archive.py >/dev/null'], stdin=source)
         run(ssh_args()+['sudo -n python3 /opt/smolofis-identity-lab/vm/verify-audit-archive.py'])
+    elif action == 'check-operation-journal':
+        PORT = '12223'
+        binary = STATE / 'panel-operation-journal'
+        with binary.open('rb') as source:
+            header = source.read(20)
+        if header[:6] != b'\x7fELF\x02\x01' or header[18:20] != b'\x3e\x00':
+            raise SystemExit('Build the Linux x86_64 operation-journal artifact first')
+        run(ssh_args()+['sudo -n install -d -m 0755 /opt/smolofis-operation-journal-lab'])
+        for source, name in (
+            (binary, 'smolofis-panel'),
+            (REPO / 'scripts/smolofis-admin.sh', 'smolofis-admin'),
+            (Path(__file__).with_name('verify-operation-journal.py'), 'verify.py'),
+            (Path(__file__).with_name('receipt_fault_tools.py'), 'receipt_fault_tools.py'),
+        ):
+            with source.open('rb') as stream:
+                run(ssh_args()+[f'sudo -n tee /opt/smolofis-operation-journal-lab/{name} >/dev/null'], stdin=stream)
+        run(ssh_args()+['sudo -n chmod 0755 /opt/smolofis-operation-journal-lab/smolofis-panel'])
+        run(ssh_args()+['sudo -n python3 /opt/smolofis-operation-journal-lab/verify.py'])
     elif action in ('check-receipt-faults', 'check-enrollment-faults'):
         PORT = '12223'
         for filename in ('receipt_fault_tools.py',
@@ -321,7 +339,7 @@ def main():
     elif action == 'status':
         run(['docker','ps','--all','--filter',f'name=^/{NAME}$','--format','{{.Names}} {{.Status}} {{.Ports}}'])
     else:
-        raise SystemExit('usage: lab.py up|status|ssh <command>|provision|services|check-services|check-local-audit|check-web-audit|check-service-sandbox|check-operation-receipts|check-operation-history|check-operation-listing|check-receipt-preservation|check-receipt-faults|check-enrollment-faults|check-audit-archive|check-archive-sync|check-audit-workflow|check-audit-lifecycle-gate|check-machine-id|prepare-private-https|stop|restore|restored-ssh <command>')
+        raise SystemExit('usage: lab.py up|status|ssh <command>|provision|services|check-services|check-local-audit|check-web-audit|check-service-sandbox|check-operation-receipts|check-operation-history|check-operation-listing|check-operation-journal|check-receipt-preservation|check-receipt-faults|check-enrollment-faults|check-audit-archive|check-archive-sync|check-audit-workflow|check-audit-lifecycle-gate|check-machine-id|prepare-private-https|stop|restore|restored-ssh <command>')
 
 if __name__ == '__main__':
     main()

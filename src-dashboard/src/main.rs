@@ -15,6 +15,7 @@ mod console;
 mod directory;
 mod enrollment;
 mod handlers;
+mod operations;
 mod system;
 mod transport;
 
@@ -44,6 +45,9 @@ async fn main() -> anyhow::Result<()> {
                 std::path::Path::new(&args[2]),
             )
             .await;
+        }
+        if args[0].starts_with("--operation-") {
+            return operations::command(&args);
         }
         if args[0].starts_with("--auth-") {
             return enrollment::command(&args).await;

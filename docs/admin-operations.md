@@ -526,3 +526,119 @@ state/checkpoint byte detection. Evidence:
 `/var/lib/smolofis-identity-machine-lab/audit-workflow-3e920e666c/report.json`.
 Fixture mounts/configuration disappeared with namespace exit. This component
 run is not complete A/B boot acceptance; full ISO CI remains pending.
+
+### Full ISO checkpoint lifecycle acceptance — 2026-11-10
+
+[PR #24 run 42800140945](https://github.com/jcyrus/smolofis/actions/runs/42800140945)
+passed on latest head `9369bd314eddc867acb24e8b3c648944c3c1e973`.
+Compilation/lint/advisories/unit/Python checks, ISO assembly and QEMU smoke passed.
+Both BIOS and UEFI logs explicitly confirm checkpoint-only history is readable
+and hashed state/history survives signed A/B promotion and corrupted-slot fallback.
+Administration remains disabled throughout the test. The PR is open, draft and
+mergeable; release publication was skipped. No production upgrade occurred.
+This closes the installed-image checkpoint persistence/fallback gate for the
+candidate, not hardware power-loss durability or arbitrary older-writer safety.
+
+## Production dev.82 rollout — 2026-11-11
+
+The installed updater verified the trusted signed manifest and the complete ISO
+SHA256 `d7e4435b0eb2e2cbc845f2267982180f32147ce8a86c61dc8d300266509288c1`.
+Staging and logs are retained under `/var/lib/smolofis/dev82-stage.UNJR3R/`.
+Backup `20261111T032720Z` completed before slot replacement. Its tar archives
+and PostgreSQL dump listed successfully.
+
+After reboot, dev.82 reached ready and the verifier promoted system-a with
+`Result=success` and `ExecMainStatus=0`. System-b/dev.80 is retained. Kernel boot
+ID changed to `f2183338-7718-412d-8f62-2339ccfac5f7`. Runtime and saved machine-ID
+hashes match their pre-upgrade values. Core units are active, no failed systemd
+units remain, and core containers recovered healthy. Gitea reports 28.2.0,
+Coolify retains one user and the public dashboard returns 200.
+
+Console, login and console assets return 404. Candidate administration units,
+auth configuration and enrollment are absent. Ports 8091 and 445 have no
+listeners. The operation-list CLI refuses an unconfigured audit file as expected.
+Tailscale remains `NeedsLogin` with empty Serve configuration. Post-check result
+is retained in `postcheck-result.txt` in the staging directory.
+
+## General operation journal preview
+
+A root command now executes a machine-identity check through persisted queued,
+running and terminal transitions. The check compares the validated runtime
+machine ID against the saved appliance identity. The journal is bound to that
+appliance identity and stored in `/var/lib/smolofis/operations/journal.json`.
+
+```sh
+sudo smolofis-admin console-job-init
+sudo smolofis-admin console-job-run
+sudo smolofis-admin console-job-list
+sudo smolofis-admin console-job-status OPERATION_ID
+sudo smolofis-admin console-job-recover
+```
+
+Initialization preserves an existing valid store. Each operation has a random
+64-character hex ID, an allowlisted kind, root UID attribution, ordered timestamped
+transitions and a typed outcome. The current executor supports
+`machine_identity_check`, with `identity_verified`, `identity_unavailable` or
+`identity_mismatch` results. A failed check records `failed` and returns an error.
+Status/listing allow discovery after a disconnected client or interrupted process.
+
+The store serializes an entire execution or recovery under a protected,
+nonblocking file lock. Every transition atomically replaces the bounded JSON
+snapshot after syncing its temporary file, then syncs the parent directory.
+The directory requires root ownership and mode 0700. Data and lock files require
+mode 0600, one hard link and regular-file identity checks. Trusted ancestors,
+appliance binding, schema, unique IDs, allowed transitions and outcomes are
+validated before execution. Store limits are 256 operations and 1 MiB.
+
+A command refuses new work while any record is queued or running. Explicit root
+recovery changes those records to terminal `unknown` with outcome `interrupted`.
+Completed records remain intact. Recovery is idempotent and performs no executor
+action. A fresh invocation after recovery receives a new operation ID. Capacity
+refusal preserves history. Retention/export, web actor attribution, worker/API
+integration, additional operation kinds and image lifecycle acceptance remain
+pending.
+
+Snapshot sync/rename errors return an uncertain-commit error with the operation
+ID. Inspect listing/status before retrying. A complete replacement can be visible
+after a directory-sync failure. Current-state inspection and process-crash tests
+establish observed state, while physical power-loss durability requires separate
+storage acceptance.
+
+Validation on 2026-11-11 passed 76 host tests (one manual browser fixture ignored),
+Clippy, formatting, ShellCheck and Python compilation. The final Linux candidate
+passed 19 native checks through the packaged command interface in a private
+mount namespace. They include listing/status across processes, preserved history
+on initialization, root/ID/concurrency guards, actual identity mismatch, foreign
+machine binding, corrupt/unsafe files, six injected sync failures and nine
+process-death boundaries. Recovery preserved completed records and marked
+unfinished work unknown before a new operation was admitted. Namespace fixtures
+were cleaned on exit. Report:
+`/var/lib/smolofis-identity-machine-lab/operation-journal-56088655dc/report.json`.
+
+Reproduce with the Linux artifact staged as
+`work/identity-m0-vm/panel-operation-journal`:
+
+```sh
+python3 scripts/dev/identity/vm/lab.py check-operation-journal
+```
+
+This preview awaits release CI and installed-image lifecycle acceptance.
+Production runs dev.82 with administration disabled.
+
+### General journal installed-image fixture — 2026-11-11
+
+The ISO lifecycle fixture now prepares protected synthetic completed and running
+operations, including an appliance identity binding. Separate hashes cover the
+journal snapshot and immutable fixture files. The previous nightly can prepare
+these bytes. After candidate promotion, CI verifies both records, performs
+explicit interrupted-work recovery, checks the completed result is intact, and
+runs a fresh machine-identity check. Updated journal bytes/results are then
+verified after failed-slot fallback. Native writer/crash tests remain the evidence
+for genuine queue transitions.
+
+Seven component checks passed in a private VM mount namespace, including
+previous-reader preparation/new-reader verification, QEMU/KVM guards, overwrite
+refusal, changed state/checkpoint/journal detection, and recovery/execution.
+Evidence:
+`/var/lib/smolofis-identity-machine-lab/audit-workflow-c13c76d582/report.json`.
+Full installed-image A/B execution awaits CI.
