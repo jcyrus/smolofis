@@ -17,6 +17,7 @@ mod enrollment;
 mod handlers;
 mod management;
 mod operations;
+mod setup;
 mod system;
 mod transport;
 
@@ -40,6 +41,9 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let private_preview = args.as_slice() == ["--private-console"];
     if !args.is_empty() && !private_preview {
+        if args.as_slice() == ["--console-setup-check"] {
+            return setup::command().await;
+        }
         if args.len() == 3 && args[0] == "--console-access-check" {
             return transport::check(
                 std::path::Path::new(&args[1]),

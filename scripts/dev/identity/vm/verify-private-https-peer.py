@@ -26,11 +26,13 @@ def client():
         urllib.request.HTTPCookieProcessor(jar), NoRedirect())
     return opener
 
-def request(opener, path, fields=None, headers=None):
+def request(opener, path, fields=None, headers=None, json_body=None):
     h = {'Origin': ORIGIN}
     if headers: h.update(headers)
-    req = urllib.request.Request(ORIGIN + path, headers=h,
-        data=urllib.parse.urlencode(fields).encode() if fields is not None else None)
+    data = urllib.parse.urlencode(fields).encode() if fields is not None else None
+    if json_body is not None:
+        data = json.dumps(json_body).encode(); h['Content-Type'] = 'application/json'
+    req = urllib.request.Request(ORIGIN + path, headers=h, data=data)
     try:
         response = opener.open(req, timeout=30)
     except urllib.error.HTTPError as error:
@@ -81,14 +83,56 @@ assert all(flag in cookie for flag in ('Secure', 'HttpOnly', 'SameSite=Strict'))
 assert request(browser, '/api/state')[0] == 200
 assert request(browser, '/console')[0] == 200
 passed('enrolled directory administrator signs in and reads console/telemetry through real Tailscale HTTPS')
+operation_report = None
+if os.environ.get('SMOLOFIS_LAB_MANAGEMENT_TEST') == 'true':
+    code, services, _ = request(browser, '/console/services')
+    assert code == 200 and 'data-run-identity' in services and '/assets/operations.js' in services
+    operation_csrf = re.search(r'data-csrf="([a-f0-9]+)"', services).group(1)
+    assert request(browser, '/assets/operations.js')[0] == 200
+    passed('CI-built console exposes the opt-in diagnostic controls and JavaScript through trusted HTTPS')
+    code, body, _ = request(browser, '/api/operations')
+    assert code == 200
+    before = json.loads(body)['operations']
+    endpoint = '/api/operations/identity-check'
+    for payload, headers, expected in [
+        ({'csrf': operation_csrf}, {'Origin': 'https://untrusted.example'}, 403),
+        ({'csrf': '0'*64}, {}, 403),
+        ({'csrf': operation_csrf, 'actor_guid': 'ab'*16}, {}, 422),
+        ({'csrf': operation_csrf, 'command': 'id'}, {}, 422),
+    ]:
+        assert request(browser, endpoint, headers=headers, json_body=payload)[0] == expected
+    assert json.loads(request(browser, '/api/operations')[1])['operations'] == before
+    passed('actual HTTPS operation requests enforce Origin, CSRF and strict body fields without adding rejected jobs')
+    code, body, headers = request(browser, endpoint, json_body={'csrf': operation_csrf})
+    assert code == 201 and 'no-store' in headers.get('Cache-Control', '')
+    operation = json.loads(body)
+    assert operation['outcome'] == 'identity_verified' and operation['actor_uid'] == 0
+    assert re.fullmatch('[a-f0-9]{32}', operation['actor_guid']) and operation['requester_uid'] > 0
+    assert [t['phase'] for t in operation['transitions']] == ['queued', 'running', 'succeeded']
+    passed('real HTTPS submission executes through the root worker with administrator and peer attribution')
+    assert json.loads(request(browser, '/api/operations/' + operation['id'])[1]) == operation
+    after = json.loads(request(browser, '/api/operations')[1])['operations']
+    assert len(after) == len(before)+1 and after[-1] == operation
+    assert request(browser, '/api/operations/bad-id')[0] == 400
+    assert request(browser, '/api/operations/' + 'fe'*32)[0] == 404
+    passed('HTTPS status/history reads preserve the confirmed result and reject invalid or unknown references')
+    assert request(client(), '/api/operations')[0] == 401
+    assert request(client(), endpoint, json_body={'csrf': operation_csrf})[0] == 401
+    passed('anonymous HTTPS clients cannot read operation history or submit checks')
+    operation_report = {'operation_id': operation['id'], 'actor_guid': operation['actor_guid'],
+                        'requester_uid': operation['requester_uid'], 'outcome': operation['outcome']}
+
 code, account, _ = request(browser, '/auth/account')
 assert code == 200
 csrf = re.search(r'name="csrf" value="([a-f0-9]+)"', account).group(1)
 code, _, _ = request(browser, '/auth/logout', {'csrf': csrf})
 assert code == 303 and request(browser, '/api/state')[0] == 401
 passed('CSRF-protected sign-out removes access through the actual HTTPS frontend')
+if operation_report:
+    assert request(browser, '/api/operations')[0] == 401
+    passed('signed-out HTTPS session loses access to the management API')
 report = {'checks': checks, 'origin': ORIGIN, 'certificate_verification': 'required with hostname checking',
-          'production_admin_enabled': False, 'network_employee_denial_tested': False}
+          'operation': operation_report, 'production_admin_enabled': False, 'network_employee_denial_tested': False}
 output = Path('/private/tmp/smolofis-private-https-peer-report.json')
 output.write_text(json.dumps(report, indent=2)); output.chmod(0o600)
 print(f'PASS: {len(checks)} real HTTPS peer checks; credential-free report: {output}', flush=True)

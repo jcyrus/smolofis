@@ -5,8 +5,8 @@ Rust/Axum/Askama panel. Primary tasks: people and groups, shared folders, and
 service diagnosis. Central identities apply to hosted services; employee
 computer sign-in is deferred.
 
-Current production status (2026-11-11): `192.168.1.17` runs dev.82 on active
-system-a. Administration remains disabled; system-b/dev.80 is retained.
+Current production status (2026-11-11): `192.168.1.17` runs dev.88 on active
+system-b. Administration remains disabled; system-a/dev.82 is retained.
 
 Update this file with evidence as work completes. A checked milestone means
 its acceptance criteria have passed, not merely that code exists.
@@ -374,7 +374,7 @@ failures and never log credentials.
 - [x] Verify [PR #25 CI run 42958095493](https://github.com/jcyrus/smolofis/actions/runs/42958095493) passed on latest head `ffa6df535f6ab06ce6e360f4f551e8a8272d0852`. Both BIOS/UEFI logs confirm journal recovery, fresh identity execution, preserved completed results and post-rollback history. Compile/ISO/smoke checks passed; draft publication skipped.
 - [x] Merge tested PR #25 as `2976c61e17deb43535d642de2c6ae690206a3326` on 2026-11-11.
 - [x] Verify [main CI run 42961750775](https://github.com/jcyrus/smolofis/actions/runs/42961750775) passed all six jobs, including BIOS/UEFI journal recovery/execution, signed upgrade, fallback and publication. Nightly dev.84 published from `2976c61e17deb43535d642de2c6ae690206a3326`; nightly tag matches. Downloaded manifest signature verifies. Signed ISO SHA256 `87602f9ce170a9e591674712734b24fbfee9b8e3a772a80574f14a8826ac60d0` matches the checksum sidecar and GitHub asset digest (962738176 bytes). Full ISO download/hash remains staging work.
-- [ ] Deploy dev.84 if requested, with fresh backup and full pinned-image verification. Production remains dev.82 with administration disabled.
+- [x] Supersede the optional dev.84 rollout with the verified dev.88 production rollout below; administration remains disabled.
 
 ### Authenticated worker/journal API preview — 2026-11-11
 
@@ -383,16 +383,37 @@ failures and never log credentials.
 - [x] Host validation: 80 tests passed, one manual fixture ignored; Clippy, formatting and Python checks passed. Nine native full-kernel API checks passed with real LDAPS, UID-65534 backend, UID-0 worker, CSRF/Origin/actor/header forgery rejection, peer/path guards, real GUID/UID attribution, unknown-ID handling, directory revocation, outage preservation and verified older-writer refusal. Evidence: `management-api-a4bace1931`.
 - [x] Validate actual systemd execution with the candidate management/journal drop-ins: 11 checks passed, including real LDAPS login, sandbox probes, attributed identity-check execution, durable history after worker restart and outage preservation. Evidence: `management-sandbox-ec9f20a22a`. Temporary services, accounts and live journal fixtures were removed.
 - [x] Verify [PR #26 CI run 42973801955](https://github.com/jcyrus/smolofis/actions/runs/42973801955) passed on `f74644b1a783ae3297e7766791d24e979540da7d`: compile, ISO, smoke, BIOS and UEFI checks passed; UEFI logs confirm interrupted journal recovery, a fresh identity check and history preservation after rollback. Draft publication was skipped.
-- [ ] Complete real HTTPS acceptance before publication/enablement. Native API acceptance used a private loopback proxy-style fixture. New drop-ins are excluded from image installation; production remains dev.82 with administration disabled.
-- [ ] Service/account mutation kinds, UI operation flows, retention/export and production integration remain pending.
+- [x] Complete real HTTPS acceptance for PR #26 publication using its exact CI artifact; 15 peer checks and user browser/mobile acceptance passed below. Initial native API acceptance used a private loopback proxy-style fixture. Production enablement still requires separate integration. New drop-ins are excluded from image installation; production remains dev.82 with administration disabled.
+- [ ] Service/account mutation kinds and their UI flows, retention/export and production integration remain pending. The identity-check UI flow is complete.
 
-- [ ] Real HTTPS acceptance of the new API is deferred at the user’s request on 2026-11-11. The prior console HTTPS acceptance does not cover these new routes. Lab login was cancelled and tailscaled stopped/disabled; production enablement remains gated.
-- [x] Open draft [PR #26](https://github.com/jcyrus/smolofis/pull/26) for the authenticated operation journal API, with 80 passing host tests, nine native API checks and 11 actual systemd checks. Full ISO/upgrade/fallback CI is pending; HTTPS acceptance remains deferred.
+- [x] Resume the previously deferred HTTPS acceptance on 2026-11-11: user approved the lab device and confirmed all new operation-flow browser steps worked. Final evidence is recorded below; production enablement remains separately gated.
+- [x] Open draft [PR #26](https://github.com/jcyrus/smolofis/pull/26) for the authenticated operation journal API, with 80 passing host tests, nine native API checks and 11 actual systemd checks. Full CI and exact-artifact HTTPS acceptance subsequently passed as recorded below.
 
 ### Console operation flow — 2026-11-11
 
 - [x] Add an opt-in Services section with operation history, expandable results/reference IDs and an identity-check action using the current administrator session CSRF token. Preserve earlier history after submission, show failed/unknown/unfinished states, block overlapping work and never retry an uncertain POST automatically. Default-off consoles omit the controls and operation asset route.
-- [x] Host validation: 80 tests passed, one manual fixture ignored; Clippy, formatting and JavaScript syntax passed. Authenticated rendering verifies the token comes from the verified session. Forty-four browser checks cover desktop 1440px, phone 390px in light/dark and narrow 320px layouts, empty/populated results, CSRF submission, history preservation, worker outage, malformed data, unfinished/unknown results, session expiry, uncertain-submit/no-retry behavior, keyboard disclosure, busy controls and measured operation text contrast of at least 4.5:1. Screenshots/report: `.impeccable/review/operations/`. Browser directory and operation responses are synthetic; real HTTPS remains deferred.
+- [x] Host validation: 80 tests passed, one manual fixture ignored; Clippy, formatting and JavaScript syntax passed. Authenticated rendering verifies the token comes from the verified session. Forty-four browser checks cover desktop 1440px, phone 390px in light/dark and narrow 320px layouts, empty/populated results, CSRF submission, history preservation, worker outage, malformed data, unfinished/unknown results, session expiry, uncertain-submit/no-retry behavior, keyboard disclosure, busy controls and measured operation text contrast of at least 4.5:1. Screenshots/report: `.impeccable/review/operations/`. Browser directory and operation responses are synthetic; subsequent real HTTPS acceptance is recorded below.
 - [x] Complete scoped design-system documentation review: existing visual tokens and native disclosure conventions are preserved; no DESIGN.md/sidecar rewrite needed.
 - [x] Finish reviewer scored the disclosure-arrow fix resolved and returned ship for this local opt-in prototype scope; refreshed screenshots and 44-check report retained.
-- [ ] Rerun PR CI for the console additions before publication.
+- [x] Verify [PR #26 CI run 42982628507](https://github.com/jcyrus/smolofis/actions/runs/42982628507) passed on `38a6a3875f5e09a4d3bb9ff8f40e76bb2f4a291c`: compile, ISO, smoke and BIOS/UEFI install/upgrade checks all passed. Draft publication skipped; subsequent real HTTPS acceptance cleared the remaining PR release gate.
+
+### PR #26 real HTTPS acceptance — 2026-11-11
+
+- [x] Rejoin the approved owner tailnet lab and stage the exact CI artifact from run `42982628507`, commit `38a6a3875f5e09a4d3bb9ff8f40e76bb2f4a291c`, binary SHA256 `fa81062af29562f8dc58b69979d6a2c3e4272d428621911e9e2701db0b287a8e`. Start temporary hardened backend, journal worker and foreground private HTTPS Serve. Production unchanged.
+- [x] Pass 15 real HTTPS peer checks: trusted certificate/hostname, sign-in/cookie/origin checks, non-admin/anonymous denial, CI-built controls/assets, operation CSRF/body guards, attributed real identity execution, status/history, unknown-ID handling and sign-out revocation. Protected journal matches the enrolled GUID and actual backend UID. Evidence: `private-https-409cb462/{https-peer-report,ci-artifact}.json`.
+- [x] User confirmed all browser/mobile steps worked: no certificate warning, directory sign-in, identity check, retained Completed result after history refresh and denied access after sign-out. Temporary trial is now stopped.
+- [x] Lock and clean up owned lab services/accounts/Serve/journal after browser acceptance; log out and stop/disable lab Tailscale. Final acceptance and archived journal retained in `private-https-409cb462`; live fixtures removed.
+- [x] Record completed HTTPS/user acceptance in PR #26 and mark it ready for review. Final head remains tested `38a6a3875f5e09a4d3bb9ff8f40e76bb2f4a291c`; GitHub reports CLEAN, all checks passed.
+- [x] Merge PR #26 as `6e52edf8d461351ac6e2d78b4d91400b2d08763c`; verify [main CI 42993088629](https://github.com/jcyrus/smolofis/actions/runs/42993088629) passed all six jobs and published dev.88. Trusted manifest signature passed; ISO SHA256 `9651bfbdbff47e29c4adbe3e53da94bfbf568bd045cb7788aaf21a7741c25447` matches the checksum sidecar and GitHub asset digest (962945024 bytes). Full ISO download/hash remains staging work. Production administration remains disabled.
+- [x] Deploy dev.88 to `192.168.1.17` on 2026-11-11: full ISO SHA256 verified; updater backup `20261111T101057Z` tar archives and PostgreSQL dump contents list passed. System-b booted/promoted; system-a/dev.82 retained. Boot ID `58389532-c3b6-4071-8449-10c00d779e7f`; machine-ID hashes, repository paths and Coolify user count (1) unchanged; core containers healthy, no failed units. Gitea 28.2.0. Console/login/operations/assets remain 404; management units/config absent; no 8091/445 listeners; Tailscale NeedsLogin and Serve empty. Evidence `/var/lib/smolofis/dev88-stage.hLzRfm/`.
+
+- [ ] Next: implement production administration provisioning and acceptance (directory enrollment, private HTTPS, worker/audit/journal permissions and connected DNS validation) before enabling the console.
+
+### Production provisioning foundation — 2026-11-11
+
+- [x] Inspect production prerequisites: dev.88 has no Samba AD, directory configuration or enrollment; the operator selected a private local directory namespace. Default realm `OFFICE.SMOLOFIS.INTERNAL`, DNS domain `office.smolofis.internal`, short domain `SMOLOFIS`. Keep the existing LAN/mDNS name and Tailscale HTTPS name separate.
+- [x] Implement root-only `smolofis-admin console-setup-check`: a bounded, redacted JSON inventory of 14 pre-start prerequisites. It checks real LDAPS reader binding/naming context/admin group, panel file access, enrollment, audit/journal permissions, reviewed-unit file presence/ownership, worker UID and Tailscale origin/certificate/empty-Serve prerequisites. It never provisions, initializes, repairs or starts anything.
+- [x] Pass 82 host tests (one manual fixture ignored), Clippy/formatting/ShellCheck/Python checks and nine native read-only/error-path acceptance groups on final binary SHA256 `99ebacde9d5e7c5211c307ee55ad4235ec641b11648d6cf5cf49a1eb298696a9`. Native evidence: `production-preflight-819d0c829a`.
+- [x] Run the validated candidate as a separate read-only inventory on production. Installed appliance, saved identity and panel account passed; 11 setup prerequisites remain. Configuration hashes stayed unchanged, core state stayed ready, candidate services remained absent and admin endpoints stayed 404. Evidence `/var/lib/smolofis/console-preflight-preview.LUlYNZ/`. Installed binary remains dev.88.
+- [ ] Pass PR CI for the prerequisite checker, including packaged-command blocked-state checks after BIOS/UEFI upgrade and fallback.
+- [ ] Implement native office directory provisioning, persistent DNS/LDAPS certificate and reader/admin-group setup, lifecycle/backup integration, then console installation/start/stop/recovery wiring. Production remains disabled until these integration checks pass.
