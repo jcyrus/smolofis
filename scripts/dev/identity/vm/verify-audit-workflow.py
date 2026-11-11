@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 ROOT = Path('/var/lib/smolofis-identity-machine-lab')
-BINARY = Path('/opt/smolofis-receipt-journal-lab/smolofis-panel' if sys.argv[1:] in (['--lifecycle'], ['--inside-lifecycle']) else '/opt/smolofis-panel-audit-lab/smolofis-panel')
+BINARY = Path('/opt/smolofis-operation-journal-lab/smolofis-panel' if sys.argv[1:] in (['--lifecycle'], ['--inside-lifecycle']) else '/opt/smolofis-panel-audit-lab/smolofis-panel')
 WRAPPER = Path('/opt/smolofis-identity-lab/vm/smolofis-admin.sh')
 if (os.geteuid() != 0 or not Path('/etc/smolofis-m0-fullvm').exists()
         or not (ROOT / 'domain-ready').exists() or Path('/etc/smolofis-release').exists()
@@ -88,15 +88,23 @@ if sys.argv[1:] == ['--inside-lifecycle']:
     assert subprocess.run(['bash', str(helper), 'verify'], capture_output=True).returncode != 0
     checkpoint.chmod(0o600); checkpoint.write_bytes(original_checkpoint); checkpoint.chmod(0o400)
     subprocess.run(['bash', str(helper), 'verify'], check=True, timeout=30)
+    journal = Path('/var/lib/smolofis/operations/journal.json')
+    original_journal = journal.read_bytes()
+    journal.write_bytes(original_journal + b' ')
+    assert subprocess.run(['bash', str(helper), 'verify'], capture_output=True).returncode != 0
+    journal.write_bytes(original_journal)
+    subprocess.run(['bash', str(helper), 'recover-journal'], check=True, timeout=30)
+    subprocess.run(['bash', str(helper), 'verify'], check=True, timeout=30)
+    assert subprocess.run(['bash', str(helper), 'recover-journal'], capture_output=True).returncode != 0
     report = {'checks': ['previous-reader preparation and candidate verification of locked schema-v2 and checkpoint-only history',
                          'QEMU and KVM detector acceptance with unsupported VM refusal',
-                         'refuse fixture overwrite', 'detect changed state bytes', 'detect changed checkpoint bytes'],
+                         'refuse fixture overwrite', 'detect changed state bytes', 'detect changed checkpoint bytes', 'detect changed journal bytes', 'recover interrupted work, preserve completed result and execute fresh identity check'],
               'binary_sha256': hashlib.file_digest(BINARY.open('rb'), 'sha256').hexdigest(),
               'helper_sha256': hashlib.file_digest(helper.open('rb'), 'sha256').hexdigest(),
               'private_mount_namespace': True, 'actual_ab_boot_tested': False,
               'production_modified': False}
     (evidence / 'report.json').write_text(json.dumps(report, indent=2))
-    print('PASS: five lifecycle gate component checks; evidence retained at ' + str(evidence), flush=True)
+    print('PASS: seven lifecycle gate component checks; evidence retained at ' + str(evidence), flush=True)
     raise SystemExit(0)
 previous_path = max(ROOT.glob('local-audit-*/report.json'), key=lambda p: p.stat().st_mtime)
 previous = json.loads(previous_path.read_text())

@@ -158,6 +158,14 @@ select_local_audit() {
 }
 
 case "${1:-}" in
+    console-job-init|console-job-run|console-job-recover|console-job-list)
+        [[ $# -eq 1 ]] || die "this command takes no additional arguments"
+        exec /usr/local/bin/smolofis-panel "--operation-${1#console-job-}" /var/lib/smolofis/operations
+        ;;
+    console-job-status)
+        [[ $# -eq 2 ]] || die "usage: smolofis-admin console-job-status operation-id"
+        exec /usr/local/bin/smolofis-panel --operation-status /var/lib/smolofis/operations "$2"
+        ;;
     console-audit-init|console-audit-archive)
         [[ $# -eq 1 ]] || die "this command takes no additional arguments"
         if [[ -n "${SMOLOFIS_LOCAL_AUDIT_FILE+x}" && "${SMOLOFIS_LOCAL_AUDIT_FILE}" != "${LOCAL_AUDIT_BASE}/events.jsonl" ]]; then
@@ -223,7 +231,7 @@ case "${1:-}" in
         log "time zone is ${zone}; nightly backups now run around 03:00 local time"
         ;;
     *)
-        echo "usage: smolofis-admin provision|show|timezone <zone>|console-enroll <username>|console-status|console-lock|console-operation-status <operation-id>|console-operation-list|console-access-check|console-audit-init|console-audit-archive" >&2
+        echo "usage: smolofis-admin provision|show|timezone <zone>|console-enroll <username>|console-status|console-lock|console-operation-status <operation-id>|console-operation-list|console-job-init|console-job-run|console-job-status <operation-id>|console-job-list|console-job-recover|console-access-check|console-audit-init|console-audit-archive" >&2
         exit 2
         ;;
 esac
