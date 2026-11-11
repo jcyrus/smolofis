@@ -8,6 +8,7 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%2334664b'/%3E%3Cpath d='M5 7h14M5 12h10M5 17h6' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/assets/console.css">
   <script src="/assets/console.js" defer></script>
+  {% if !operation_csrf.is_empty() %}<script src="/assets/operations.js" defer></script>{% endif %}
 </head>
 <body data-page="{{ page }}" data-phase="{{ phase }}">
 {% include "console-icons.html" %}
@@ -27,7 +28,7 @@
   </div>
 </aside>
 <main id="main" tabindex="-1">
-  <div class="utility-bar"><span class="preview-label"><svg class="icon" aria-hidden="true"><use href="#icon-lock"/></svg>Read-only preview</span><div class="utility-links">{% if signed_in %}<a class="classic-link" href="/auth/account">Account & sign out</a>{% endif %}<a class="classic-link" href="/">Classic panel<svg class="icon" aria-hidden="true"><use href="#icon-external"/></svg></a></div></div>
+  <div class="utility-bar"><span class="preview-label"><svg class="icon" aria-hidden="true"><use href="#icon-lock"/></svg>{% if operation_csrf.is_empty() %}Read-only preview{% else %}Diagnostics preview{% endif %}</span><div class="utility-links">{% if signed_in %}<a class="classic-link" href="/auth/account">Account & sign out</a>{% endif %}<a class="classic-link" href="/">Classic panel<svg class="icon" aria-hidden="true"><use href="#icon-external"/></svg></a></div></div>
   <header class="page-header"><div><h1>{{ title }}</h1><p>{{ description }}</p></div>{% if page == "services" %}<button class="button secondary" type="button" disabled data-refresh><svg class="icon" aria-hidden="true"><use href="#icon-refresh"/></svg><span>Check again</span></button>{% endif %}</header>
   <div id="connection-error" class="connection-error" role="status" hidden><svg class="icon" aria-hidden="true"><use href="#icon-info"/></svg><div><strong>Connection lost</strong><p>Showing the last successful check. Reconnect to the server or try again.</p></div><button class="button secondary" type="button" disabled data-refresh>Try again</button></div>
   <noscript><p class="plain-notice">Live updates, copy buttons, and appearance controls need JavaScript. Reload this page to get a fresh reading.</p></noscript>
@@ -66,7 +67,16 @@
     <details class="service" data-service="{{ s.id }}" data-health="{{ s.health }}"><summary><span class="tool-icon"><svg class="icon" aria-hidden="true"><use href="#icon-{{ s.id }}"/></svg></span><span class="service-name"><strong>{{ s.name }}</strong><span>{{ s.role }}</span></span><span class="status" data-service-status>{{ s.label }}</span><svg class="icon disclosure" aria-hidden="true"><use href="#icon-chevron"/></svg></summary><div class="service-details"><p>{{ s.impact }}</p><dl class="service-metadata"><div><dt>Latest check</dt><dd data-service-detail>{{ s.detail }}</dd></div><div><dt>Response time</dt><dd data-service-latency>{{ s.latency }}</dd></div></dl><div class="service-actions"><button class="button secondary" type="button" disabled data-copy-service="{{ s.id }}"><svg class="icon" aria-hidden="true"><use href="#icon-copy"/></svg>Copy diagnostics</button>{% if let Some(url) = s.url %}<a class="button secondary" data-launch="{{ s.id }}" href="{{ url }}" target="_blank" rel="noopener noreferrer" {% if s.health != "online" %}hidden{% endif %}>Open {{ s.name }}<svg class="icon" aria-hidden="true"><use href="#icon-external"/></svg></a>{% endif %}</div><textarea class="copy-fallback" data-copy-fallback hidden readonly aria-label="Service diagnostics to copy"></textarea></div></details>
   {% endfor %}
   </div>
-  <p class="support-note"><svg class="icon" aria-hidden="true"><use href="#icon-info"/></svg>This preview can inspect services. Restart controls will follow administrator sign-in.</p>
+  {% if !operation_csrf.is_empty() %}
+  <section class="section operation-panel" data-operations data-csrf="{{ operation_csrf }}" aria-labelledby="operation-heading">
+    <div class="section-heading"><div><h2 id="operation-heading">Server checks</h2><p>Confirm that this server matches its saved identity. Your files and services stay as they are.</p></div><button class="button primary" type="button" disabled data-run-identity>Run identity check</button></div>
+    <div class="operation-history-heading"><h3>Recent operations</h3><button class="button secondary" type="button" disabled data-refresh-operations>Refresh history</button></div>
+    <p class="operation-notice" data-operation-notice role="status" aria-live="polite">Loading operation history…</p>
+    <div class="operation-history" data-operation-history></div>
+    <noscript><p class="plain-notice">Server checks and operation history need JavaScript.</p></noscript>
+  </section>
+  {% endif %}
+  <p class="support-note"><svg class="icon" aria-hidden="true"><use href="#icon-info"/></svg>Service restart controls are not available in this preview.</p>
 
   {% else if page == "shares" %}
   <section class="setup-state" aria-labelledby="share-setup"><span class="task-icon folder"><svg class="icon" aria-hidden="true"><use href="#icon-folder"/></svg></span><span class="connection-label">Not connected</span><h2 id="share-setup">A place for your team's files</h2><p>Shared-folder management is not connected to this panel yet. Once connected, you can create folders and choose which groups can read or change their files.</p><a class="button primary" href="/console/settings#connections">See connection status<svg class="icon" aria-hidden="true"><use href="#icon-arrow"/></svg></a></section>

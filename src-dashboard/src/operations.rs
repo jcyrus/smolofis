@@ -51,6 +51,10 @@ struct Operation {
     id: String,
     kind: Kind,
     actor_uid: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    actor_guid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    requester_uid: Option<u32>,
     transitions: Vec<Transition>,
     outcome: Option<Outcome>,
 }
@@ -64,6 +68,14 @@ impl Operation {
         anyhow::ensure!(
             valid_id(&self.id) && self.actor_uid == 0,
             "invalid operation identity or actor"
+        );
+        anyhow::ensure!(
+            match (&self.actor_guid, self.requester_uid) {
+                (None, None) => true,
+                (Some(guid), Some(uid)) => valid_guid(guid) && uid != 0,
+                _ => false,
+            },
+            "invalid directory administrator attribution"
         );
         let phases: Vec<_> = self.transitions.iter().map(|entry| entry.phase).collect();
         anyhow::ensure!(
@@ -139,6 +151,10 @@ impl Journal {
 
 fn valid_id(id: &str) -> bool {
     id.len() == 64 && id.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+pub(crate) fn valid_guid(guid: &str) -> bool {
+    guid.len() == 32 && guid.bytes().all(|byte| byte.is_ascii_hexdigit()) && guid != "0".repeat(32)
 }
 
 fn timestamp() -> Result<u128> {
@@ -254,7 +270,15 @@ impl Store {
         result.context("journal commit uncertain; inspect operation status before retrying")
     }
 
+    #[cfg(test)]
     fn enqueue(&mut self) -> Result<String> {
+        self.enqueue_as(None)
+    }
+
+    fn enqueue_as(&mut self, actor: Option<(&str, u32)>) -> Result<String> {
+        if let Some((guid, uid)) = actor {
+            anyhow::ensure!(valid_guid(guid) && uid != 0, "invalid directory actor");
+        }
         anyhow::ensure!(
             self.journal.operations.len() < MAX_OPERATIONS,
             "operation journal capacity reached"
@@ -272,6 +296,8 @@ impl Store {
             id: id.clone(),
             kind: Kind::MachineIdentityCheck,
             actor_uid: 0,
+            actor_guid: actor.map(|(guid, _)| guid.to_ascii_lowercase()),
+            requester_uid: actor.map(|(_, uid)| uid),
             transitions: vec![Transition {
                 phase: Phase::Queued,
                 timestamp_ms: timestamp()?,
@@ -394,6 +420,53 @@ fn check_identity() -> Outcome {
     }
 }
 
+fn execute(base: &Path, actor: Option<(&str, u32)>) -> Result<Operation> {
+    let mut store = Store::open(base)?;
+    let id = store.enqueue_as(actor)?;
+    store.advance(&id, Phase::Running, None)?;
+    let outcome = check_identity();
+    let phase = if outcome == Outcome::IdentityVerified {
+        Phase::Succeeded
+    } else {
+        Phase::Failed
+    };
+    store.advance(&id, phase, Some(outcome))?;
+    store
+        .journal
+        .operations
+        .last()
+        .cloned()
+        .context("operation missing")
+}
+
+pub(crate) fn worker_ready(base: &Path) -> Result<()> {
+    crate::enrollment::require_root()?;
+    let _store = Store::open(base)?;
+    Ok(())
+}
+
+pub(crate) fn worker_run(base: &Path, guid: &str, uid: u32) -> Result<serde_json::Value> {
+    crate::enrollment::require_root()?;
+    Ok(serde_json::to_value(execute(base, Some((guid, uid)))?)?)
+}
+
+pub(crate) fn worker_read(base: &Path, id: Option<&str>) -> Result<serde_json::Value> {
+    crate::enrollment::require_root()?;
+    let store = Store::open(base)?;
+    match id {
+        Some(id) => {
+            anyhow::ensure!(valid_id(id), "invalid operation ID");
+            let operation = store
+                .journal
+                .operations
+                .iter()
+                .find(|operation| operation.id.eq_ignore_ascii_case(id));
+            Ok(serde_json::to_value(operation)?)
+        }
+        None => Ok(serde_json::to_value(store.journal)?),
+    }
+}
+
 pub fn command(args: &[String]) -> Result<()> {
     crate::enrollment::require_root()?;
     match args {
@@ -402,15 +475,9 @@ pub fn command(args: &[String]) -> Result<()> {
             println!("{{\"version\":1,\"initialized\":true}}");
         }
         [action, base] if action == "--operation-run" => {
-            let mut store = Store::open(Path::new(base))?;
-            let id = store.enqueue()?;
-            store.advance(&id, Phase::Running, None)?;
-            let outcome = check_identity();
-            let phase = if outcome == Outcome::IdentityVerified { Phase::Succeeded } else { Phase::Failed };
-            store.advance(&id, phase, Some(outcome))?;
-            let operation = store.journal.operations.last().context("operation missing")?;
-            println!("{}", serde_json::to_string_pretty(operation)?);
-            anyhow::ensure!(phase == Phase::Succeeded, "Operation {id} failed; inspect its recorded outcome");
+            let operation = execute(Path::new(base), None)?;
+            println!("{}", serde_json::to_string_pretty(&operation)?);
+            anyhow::ensure!(operation.phase() == Phase::Succeeded, "Operation {} failed; inspect its recorded outcome", operation.id);
         }
         [action, base] if action == "--operation-recover" => {
             let mut store = Store::open(Path::new(base))?;
@@ -501,6 +568,30 @@ mod tests {
             reopened.journal.operations.last().unwrap().phase(),
             Phase::Unknown
         );
+    }
+
+    #[test]
+    fn worker_attribution_preserves_legacy_root_records_and_rejects_partial_or_invalid_actors() {
+        let (fixture, uid) = fixture();
+        let mut store = Store::open_checked(&fixture.0, uid).unwrap();
+        assert!(store.enqueue_as(Some(("bad", 65534))).is_err());
+        assert!(store.enqueue_as(Some((&"ab".repeat(16), 0))).is_err());
+        let id = store.enqueue_as(Some((&"AB".repeat(16), 65534))).unwrap();
+        store.advance(&id, Phase::Running, None).unwrap();
+        store
+            .advance(&id, Phase::Succeeded, Some(Outcome::IdentityVerified))
+            .unwrap();
+        let operation = &mut store.journal.operations[0];
+        assert_eq!(operation.actor_uid, 0);
+        assert_eq!(
+            operation.actor_guid.as_deref(),
+            Some("abababababababababababababababab")
+        );
+        assert_eq!(operation.requester_uid, Some(65534));
+        operation.requester_uid = None;
+        assert!(operation.validate().is_err());
+        operation.actor_guid = None;
+        assert!(operation.validate().is_ok());
     }
 
     #[test]

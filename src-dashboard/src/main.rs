@@ -15,6 +15,7 @@ mod console;
 mod directory;
 mod enrollment;
 mod handlers;
+mod management;
 mod operations;
 mod system;
 mod transport;
@@ -53,6 +54,18 @@ async fn main() -> anyhow::Result<()> {
             return enrollment::command(&args).await;
         }
         #[cfg(unix)]
+        if args.len() == 4 && args[0] == "--admin-worker" {
+            let uid = args[2]
+                .parse::<u32>()
+                .context("panel UID must be numeric")?;
+            return admin_worker::serve_configured(
+                std::path::Path::new(&args[1]),
+                uid,
+                Some(std::path::PathBuf::from(&args[3])),
+            )
+            .await;
+        }
+        #[cfg(unix)]
         if args.len() == 3 && args[0] == "--admin-worker" {
             let uid = args[2]
                 .parse::<u32>()
@@ -75,6 +88,10 @@ async fn main() -> anyhow::Result<()> {
         "smolofis-panel starting"
     );
 
+    let management_enabled = std::env::var("SMOLOFIS_MANAGEMENT_ENABLED")
+        .unwrap_or_else(|_| "false".to_owned())
+        .parse::<bool>()
+        .context("SMOLOFIS_MANAGEMENT_ENABLED requires true or false")?;
     let state = Arc::new(system::AppState::new(config.clone()));
     system::spawn_poller(Arc::clone(&state));
 
@@ -84,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/healthz", get(handlers::healthz))
         .route("/assets/app.css", get(handlers::asset_css))
         .route("/assets/fonts/{file}", get(handlers::asset_font))
-        .merge(console::routes(config.console_enabled));
+        .merge(console::routes(config.console_enabled, management_enabled));
     let auth_config = if private_preview {
         Some(std::ffi::OsString::from("/etc/smolofis/panel-auth.json"))
     } else {
@@ -98,6 +115,10 @@ async fn main() -> anyhow::Result<()> {
         std::env::var_os("SMOLOFIS_AUTH_STATE")
     };
     anyhow::ensure!(
+        !management_enabled || (auth_config.is_some() && auth_state.is_some()),
+        "management requires configured authentication and device enrollment"
+    );
+    anyhow::ensure!(
         auth_state.is_none() || auth_config.is_some(),
         "enrollment state requires authentication configuration"
     );
@@ -110,8 +131,11 @@ async fn main() -> anyhow::Result<()> {
             std::path::Path::new(&path),
             auth_state.as_deref().map(std::path::Path::new),
         )?;
-        if private_preview {
+        if private_preview || management_enabled {
             transport::private_host(auth.private_transport_origin()?)?;
+        }
+        if management_enabled {
+            app = app.merge(management::routes());
         }
         app = app
             .merge(auth::routes())

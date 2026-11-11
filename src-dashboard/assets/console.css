@@ -339,3 +339,30 @@ main.auth-main { margin: 0; padding: 0; width: 100%; max-width: 400px; }
 .auth-back { text-align: center; text-decoration: underline; color: var(--green); }
 .auth-error { margin-top: 24px; padding: 14px 16px; border-radius: 8px; background: var(--red-soft); color: var(--red); }
 @media (max-width: 760px) { .auth-body { padding-bottom: 40px; } }
+
+/* Administrative diagnostics share the service page's flat disclosure rows. */
+.operation-panel { margin-top: 40px; }
+.operation-panel .section-heading { align-items: flex-start; gap: 24px; }
+.operation-panel .section-heading p { color: var(--muted); max-width: 65ch; margin-top: 8px; }
+.operation-panel .section-heading .button { flex-shrink: 0; }
+.operation-history-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 28px 0 12px; }
+.operation-history-heading h3 { font-size: 16px; }
+.operation-notice { color: var(--muted); margin: 12px 0 20px; max-width: 70ch; }
+.operation-history { border-top: 1px solid var(--line); }
+.operation-row { border-bottom: 1px solid var(--line); }
+.operation-row summary { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 0; cursor: pointer; }
+.operation-summary { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.operation-row[open] .disclosure { transform: rotate(90deg); }
+.operation-summary time { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.operation-status { color: var(--green); font-size: 13px; font-weight: 600; }
+.operation-row[data-phase="failed"] .operation-status { color: var(--red); }
+.operation-row[data-phase="unknown"] .operation-status, .operation-row[data-phase="running"] .operation-status, .operation-row[data-phase="queued"] .operation-status { color: var(--amber); }
+.operation-detail { padding: 0 0 24px; }
+.operation-detail dl { display: grid; gap: 12px; margin-top: 16px; }
+.operation-detail dt { color: var(--muted); font-size: 13px; }
+.operation-detail dd { margin: 2px 0 0; overflow-wrap: anywhere; font-size: 13px; }
+@media (max-width: 640px) {
+  .operation-panel .section-heading { flex-direction: column; gap: 16px; }
+  .operation-panel .section-heading .button { width: 100%; }
+  .operation-row summary { align-items: flex-start; gap: 12px; }
+}

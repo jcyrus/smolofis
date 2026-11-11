@@ -185,6 +185,20 @@ def main():
         with Path(__file__).with_name('verify-audit-archive.py').open('rb') as source:
             run(ssh_args()+['sudo -n tee /opt/smolofis-identity-lab/vm/verify-audit-archive.py >/dev/null'], stdin=source)
         run(ssh_args()+['sudo -n python3 /opt/smolofis-identity-lab/vm/verify-audit-archive.py'])
+    elif action == 'check-management-api':
+        PORT = '12223'
+        binary = STATE / 'panel-management-api'
+        with binary.open('rb') as source:
+            header = source.read(20)
+        if header[:6] != b'\x7fELF\x02\x01' or header[18:20] != b'\x3e\x00':
+            raise SystemExit('Build the Linux x86_64 management API artifact first')
+        run(ssh_args()+['sudo -n install -d -m 0755 /opt/smolofis-management-api-lab'])
+        for source, name in ((binary, 'smolofis-panel'),
+                             (Path(__file__).with_name('verify-management-api.py'), 'verify.py')):
+            with source.open('rb') as stream:
+                run(ssh_args()+[f'sudo -n tee /opt/smolofis-management-api-lab/{name} >/dev/null'], stdin=stream)
+        run(ssh_args()+['sudo -n chmod 0755 /opt/smolofis-management-api-lab/smolofis-panel'])
+        run(ssh_args()+['sudo -n python3 /opt/smolofis-management-api-lab/verify.py'])
     elif action == 'check-operation-journal':
         PORT = '12223'
         binary = STATE / 'panel-operation-journal'
@@ -253,6 +267,21 @@ def main():
         with Path(__file__).with_name('verify-operation-receipts.py').open('rb') as source:
             run(ssh_args()+['sudo -n tee /opt/smolofis-identity-lab/vm/verify-operation-receipts.py >/dev/null'], stdin=source)
         run(ssh_args()+['sudo -n python3 /opt/smolofis-identity-lab/vm/verify-operation-receipts.py'])
+    elif action == 'check-management-sandbox':
+        PORT = '12223'
+        files = (
+            (REPO / 'config/systemd/smolofis-console-preview.service', 'smolofis-console-preview.service'),
+            (REPO / 'config/systemd/smolofis-admin-worker.service', 'smolofis-admin-worker.service'),
+            (REPO / 'config/systemd/smolofis-console-preview.service.d/audit.conf', 'audit.conf'),
+            (Path(__file__).with_name('sandbox-probe.py'), 'sandbox-probe.py'),
+            (REPO / 'config/systemd/smolofis-console-preview.service.d/management.conf', 'management.conf'),
+            (REPO / 'config/systemd/smolofis-admin-worker.service.d/journal.conf', 'journal.conf'),
+            (Path(__file__).with_name('verify-management-sandbox.py'), 'verify-management-sandbox.py'),
+        )
+        for source, name in files:
+            with source.open('rb') as stream:
+                run(ssh_args()+[f'sudo -n tee /opt/smolofis-identity-lab/vm/{name} >/dev/null'], stdin=stream)
+        run(ssh_args()+['sudo -n python3 /opt/smolofis-identity-lab/vm/verify-management-sandbox.py'])
     elif action == 'check-service-sandbox':
         PORT = '12223'
         files = (
@@ -339,7 +368,7 @@ def main():
     elif action == 'status':
         run(['docker','ps','--all','--filter',f'name=^/{NAME}$','--format','{{.Names}} {{.Status}} {{.Ports}}'])
     else:
-        raise SystemExit('usage: lab.py up|status|ssh <command>|provision|services|check-services|check-local-audit|check-web-audit|check-service-sandbox|check-operation-receipts|check-operation-history|check-operation-listing|check-operation-journal|check-receipt-preservation|check-receipt-faults|check-enrollment-faults|check-audit-archive|check-archive-sync|check-audit-workflow|check-audit-lifecycle-gate|check-machine-id|prepare-private-https|stop|restore|restored-ssh <command>')
+        raise SystemExit('usage: lab.py up|status|ssh <command>|provision|services|check-services|check-local-audit|check-web-audit|check-service-sandbox|check-management-sandbox|check-operation-receipts|check-operation-history|check-operation-listing|check-operation-journal|check-management-api|check-receipt-preservation|check-receipt-faults|check-enrollment-faults|check-audit-archive|check-archive-sync|check-audit-workflow|check-audit-lifecycle-gate|check-machine-id|prepare-private-https|stop|restore|restored-ssh <command>')
 
 if __name__ == '__main__':
     main()
