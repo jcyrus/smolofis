@@ -15,6 +15,7 @@ mod console;
 mod directory;
 mod enrollment;
 mod handlers;
+mod management;
 mod operations;
 mod system;
 mod transport;
@@ -51,6 +52,18 @@ async fn main() -> anyhow::Result<()> {
         }
         if args[0].starts_with("--auth-") {
             return enrollment::command(&args).await;
+        }
+        #[cfg(unix)]
+        if args.len() == 4 && args[0] == "--admin-worker" {
+            let uid = args[2]
+                .parse::<u32>()
+                .context("panel UID must be numeric")?;
+            return admin_worker::serve_configured(
+                std::path::Path::new(&args[1]),
+                uid,
+                Some(std::path::PathBuf::from(&args[3])),
+            )
+            .await;
         }
         #[cfg(unix)]
         if args.len() == 3 && args[0] == "--admin-worker" {
@@ -97,6 +110,14 @@ async fn main() -> anyhow::Result<()> {
     } else {
         std::env::var_os("SMOLOFIS_AUTH_STATE")
     };
+    let management_enabled = std::env::var("SMOLOFIS_MANAGEMENT_ENABLED")
+        .unwrap_or_else(|_| "false".to_owned())
+        .parse::<bool>()
+        .context("SMOLOFIS_MANAGEMENT_ENABLED requires true or false")?;
+    anyhow::ensure!(
+        !management_enabled || (auth_config.is_some() && auth_state.is_some()),
+        "management requires configured authentication and device enrollment"
+    );
     anyhow::ensure!(
         auth_state.is_none() || auth_config.is_some(),
         "enrollment state requires authentication configuration"
@@ -110,8 +131,11 @@ async fn main() -> anyhow::Result<()> {
             std::path::Path::new(&path),
             auth_state.as_deref().map(std::path::Path::new),
         )?;
-        if private_preview {
+        if private_preview || management_enabled {
             transport::private_host(auth.private_transport_origin()?)?;
+        }
+        if management_enabled {
+            app = app.merge(management::routes());
         }
         app = app
             .merge(auth::routes())

@@ -1,4 +1,4 @@
-//! Opt-in directory sessions. No management operations are exposed.
+//! Directory sessions with per-request administrator verification.
 use crate::{
     directory::{AdDirectory, Directory, DirectoryConfig, Identity},
     system::AppState,
@@ -46,6 +46,22 @@ struct Session {
     created: Instant,
     last_used: Instant,
 }
+#[derive(Clone)]
+pub(crate) struct VerifiedAdmin {
+    identity: Identity,
+    csrf: String,
+    generation: Option<String>,
+}
+impl VerifiedAdmin {
+    pub(crate) fn guid(&self) -> String {
+        self.identity
+            .0
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+}
+
 struct Attempt {
     start: Instant,
     count: u32,
@@ -328,6 +344,23 @@ pub async fn verify_first_admin(
     .map_err(|_| anyhow::anyhow!("directory administrator verification failed"))
 }
 
+impl Auth {
+    pub(crate) fn authorize_operation(
+        &self,
+        headers: &HeaderMap,
+        admin: &VerifiedAdmin,
+        csrf: &str,
+    ) -> Result<(), StatusCode> {
+        if !self.same_origin(headers) || !valid_token(csrf) || admin.csrf != csrf {
+            return Err(StatusCode::FORBIDDEN);
+        }
+        if self.generation()? != admin.generation {
+            return Err(StatusCode::SERVICE_UNAVAILABLE);
+        }
+        Ok(())
+    }
+}
+
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/auth/login", get(login_page).post(login))
@@ -338,7 +371,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 
 pub async fn guard(
     Extension(auth): Extension<Arc<Auth>>,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> Response {
     if request.uri().path() == "/healthz" && request.method() == Method::GET {
@@ -358,7 +391,11 @@ pub async fn guard(
         next.run(request).await
     } else {
         match auth.session(request.headers()).await {
-            Ok(_) => next.run(request).await,
+            Ok((_, session)) => {
+                request.extensions_mut().insert(VerifiedAdmin { identity: session.identity,
+                    csrf: session.csrf, generation: session.generation });
+                next.run(request).await
+            },
             Err(StatusCode::UNAUTHORIZED)
                 if request.method() == Method::GET && !path.starts_with("/api/") =>
             {
@@ -634,6 +671,7 @@ mod tests {
                 .route("/api/state", get(crate::handlers::api_state))
                 .route("/healthz", get(|| async { "ok" }))
                 .merge(crate::console::routes(true))
+                .merge(crate::management::routes())
                 .merge(routes())
                 .layer(axum::middleware::from_fn(guard))
                 .layer(Extension(auth.clone()))
@@ -702,6 +740,73 @@ mod tests {
             assert!(cookie.contains("HttpOnly") && cookie.contains("SameSite=Strict"));
             cookie.split(';').next().unwrap().to_owned()
         }
+    }
+
+    #[tokio::test]
+    async fn operation_api_rejects_unauthenticated_csrf_actor_forgery_and_revoked_sessions() {
+        let server = Server::start().await;
+        assert_eq!(
+            server.request("/api/operations", "").await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let cookie = server.login().await;
+        let account = server
+            .request("/auth/account", &cookie)
+            .await
+            .text()
+            .await
+            .unwrap();
+        let csrf = account
+            .split("name=\"csrf\" value=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        let url = format!("{}/api/operations/identity-check", server.origin);
+        for (origin, supplied, extra, expected) in [
+            ("https://other.invalid", csrf, false, StatusCode::FORBIDDEN),
+            (
+                server.origin.as_str(),
+                "wrong",
+                false,
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                server.origin.as_str(),
+                csrf,
+                true,
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+        ] {
+            let mut input = serde_json::json!({"csrf":supplied});
+            if extra {
+                input["actor_guid"] = serde_json::json!("ab".repeat(16));
+            }
+            let response = server
+                .client
+                .post(&url)
+                .header(header::COOKIE, &cookie)
+                .header(header::ORIGIN, origin)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(input.to_string())
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), expected);
+        }
+        assert_eq!(
+            server
+                .request("/api/operations/bad-id", &cookie)
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        server.directory.0.store(0, Ordering::SeqCst);
+        assert_eq!(
+            server.request("/api/operations", &cookie).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
     }
 
     #[tokio::test]

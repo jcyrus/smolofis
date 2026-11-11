@@ -642,3 +642,77 @@ refusal, changed state/checkpoint/journal detection, and recovery/execution.
 Evidence:
 `/var/lib/smolofis-identity-machine-lab/audit-workflow-c13c76d582/report.json`.
 Full installed-image A/B execution awaits CI.
+
+### Journal release acceptance — 2026-11-11
+
+PR #25 passed full CI on `ffa6df535f6ab06ce6e360f4f551e8a8272d0852`
+and merged as `2976c61e17deb43535d642de2c6ae690206a3326`.
+[Main run 42961750775](https://github.com/jcyrus/smolofis/actions/runs/42961750775)
+passed compile, ISO assembly, smoke, BIOS/UEFI installation and publication.
+Both firmware tests exercised journal persistence, interrupted-work recovery,
+fresh identity execution and failed-slot fallback.
+
+Nightly dev.84 was published and its tag matches the merge commit. The downloaded
+manifest verifies against the trusted release signer. Signed ISO hash
+`87602f9ce170a9e591674712734b24fbfee9b8e3a772a80574f14a8826ac60d0`
+matches the checksum sidecar and GitHub asset digest. Full downloaded-image
+verification belongs to server staging. Production remains dev.82 with
+administration disabled. Worker/API and directory actor integration remain next.
+
+## Authenticated journal API preview
+
+`SMOLOFIS_MANAGEMENT_ENABLED=true` enables three administration routes after
+authentication configuration, device enrollment and an HTTPS ts.net origin are
+validated at startup:
+
+| Route | Behavior |
+| --- | --- |
+| `GET /api/operations` | Read the bounded operation journal through the worker |
+| `GET /api/operations/{operation_id}` | Read one operation; malformed IDs return 400 and absent IDs return 404 |
+| `POST /api/operations/identity-check` | Accept JSON containing only the session CSRF token; return the recorded operation with 201 |
+
+The authentication guard supplies an internal verified administrator identity.
+POST also verifies Origin, CSRF and current enrollment generation before worker
+submission. Actor GUIDs and peer UIDs are derived server-side. Public request
+bodies cannot select them. The CSRF value is available to the signed-in user
+in the existing account form. Responses have no-store caching policy.
+
+The worker authenticates the Unix peer and accepts typed operations against its
+root-configured journal. Journal records retain execution UID 0 and additionally
+store the administrator's immutable GUID and actual panel UID. Recovery remains
+a local root command. Worker outage, busy execution, unsafe sockets and invalid
+responses yield 503 with guidance to inspect submitted operations before retrying.
+The prototype executes the identity diagnostic synchronously. Service/account
+mutation kinds, management UI and production wiring remain further integration.
+
+Validation on 2026-11-11 passed 80 host tests (one manual browser fixture ignored),
+Clippy, formatting and Python checks. Nine native checks passed with real
+certificate-verified Samba LDAPS, an unprivileged UID-65534 backend and a UID-0
+worker. They cover default-off routes, required configuration, non-admin denial,
+CSRF/Origin/actor forgery, typed durable results with the real administrator GUID
+and kernel requester UID, malformed/unknown IDs, socket caller/path restrictions,
+directory revocation, worker outage and older-reader/writer refusal with unchanged
+attributed history. Synthetic directory accounts, processes and namespace fixtures
+were cleaned up.
+
+The backend transport test used private loopback HTTP with an HTTPS origin and
+manually supplied Secure cookies, modeling the existing HTTPS proxy boundary.
+Actual public TLS for these new API routes remains an acceptance task. The
+actual hardened systemd units and new management/journal drop-ins passed 11
+checks, including attributed execution, successful synced transitions, worker
+restart persistence, outage preservation and denial of direct backend access to
+the root journal. Report: `management-sandbox-ec9f20a22a/report.json`. Report:
+`/var/lib/smolofis-identity-machine-lab/management-api-a4bace1931/report.json`.
+Reproduce with the candidate in `work/identity-m0-vm/panel-management-api`:
+
+```sh
+python3 scripts/dev/identity/vm/lab.py check-management-api
+python3 scripts/dev/identity/vm/lab.py check-management-sandbox
+```
+
+The journal uses optional actor fields to retain legacy root-record readability.
+The verified pre-attribution binary refuses new records on read/run/recover,
+preserving the original bytes. A socket timeout may occur while its blocking
+commit finishes; an execution permit remains held until that work ends. No
+automatic retry is performed by the API. Production runs dev.82 with
+administration disabled.
