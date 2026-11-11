@@ -386,3 +386,4 @@ failures and never log credentials.
 - [ ] Service/account mutation kinds, UI operation flows, retention/export and production integration remain pending.
 
 - [ ] Real HTTPS acceptance of the new API is deferred at the user’s request on 2026-11-11. The prior console HTTPS acceptance does not cover these new routes. Lab login was cancelled and tailscaled stopped/disabled; production enablement remains gated.
+- [x] Open draft [PR #26](https://github.com/jcyrus/smolofis/pull/26) for the authenticated operation journal API, with 80 passing host tests, nine native API checks and 11 actual systemd checks. Full ISO/upgrade/fallback CI is pending; HTTPS acceptance remains deferred.
