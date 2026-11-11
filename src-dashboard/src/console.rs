@@ -16,6 +16,7 @@ use crate::system::{AppState, BootPhase, ServiceHealth};
 
 const CSS: &[u8] = include_bytes!("../assets/console.css");
 const JS: &[u8] = include_bytes!("../assets/console.js");
+const OPERATIONS_JS: &[u8] = include_bytes!("../assets/operations.js");
 const PAGES: &[&str] = &[
     "/console",
     "/console/",
@@ -25,7 +26,10 @@ const PAGES: &[&str] = &[
     "/console/settings",
 ];
 
-pub fn routes(enabled: bool) -> Router<Arc<AppState>> {
+#[derive(Clone)]
+struct ManagementUi(bool);
+
+pub fn routes(enabled: bool, management_enabled: bool) -> Router<Arc<AppState>> {
     let mut router = Router::new();
     if enabled {
         for path in PAGES {
@@ -35,7 +39,10 @@ pub fn routes(enabled: bool) -> Router<Arc<AppState>> {
             .route("/assets/console.css", get(css))
             .route("/assets/console.js", get(js));
     }
-    router
+    if enabled && management_enabled {
+        router = router.route("/assets/operations.js", get(operations_js));
+    }
+    router.layer(axum::Extension(ManagementUi(management_enabled)))
 }
 
 struct ServiceView {
@@ -54,6 +61,7 @@ struct ServiceView {
 #[template(path = "console.html")]
 struct ConsoleTemplate {
     signed_in: bool,
+    operation_csrf: String,
     page: &'static str,
     title: &'static str,
     description: &'static str,
@@ -82,6 +90,8 @@ async fn page(
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
     auth: Option<axum::Extension<Arc<crate::auth::Auth>>>,
+    axum::Extension(management): axum::Extension<ManagementUi>,
+    admin: Option<axum::Extension<crate::auth::VerifiedAdmin>>,
 ) -> Response {
     let (page, title, description) = match uri.path().trim_end_matches('/') {
         "/console" => (
@@ -164,6 +174,10 @@ async fn page(
     }).collect();
     let template = ConsoleTemplate {
         signed_in: auth.is_some(),
+        operation_csrf: admin
+            .filter(|_| management.0 && page == "services")
+            .map(|admin| admin.csrf().to_owned())
+            .unwrap_or_default(),
         page,
         title,
         description,
@@ -275,6 +289,17 @@ async fn js() -> impl IntoResponse {
     )
 }
 
+async fn operations_js() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-cache"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        ],
+        OPERATIONS_JS,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,7 +327,7 @@ mod tests {
             let state = Arc::new(AppState::new(config));
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
-            let app = routes(enabled).with_state(state);
+            let app = routes(enabled, false).with_state(state);
             let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
             let client = reqwest::Client::new();
             for path in PAGES
@@ -330,9 +355,19 @@ mod tests {
                         .contains_key(header::CONTENT_SECURITY_POLICY));
                     let body = response.text().await.unwrap();
                     assert!(body.contains("Read-only preview"));
+                    assert!(!body.contains("data-run-identity"));
                     assert!(body.contains("/assets/console.js"));
                 }
             }
+            assert_eq!(
+                client
+                    .get(format!("http://{address}/assets/operations.js"))
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::NOT_FOUND
+            );
             server.abort();
         }
     }

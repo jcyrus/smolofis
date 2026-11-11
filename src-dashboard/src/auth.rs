@@ -53,6 +53,9 @@ pub(crate) struct VerifiedAdmin {
     generation: Option<String>,
 }
 impl VerifiedAdmin {
+    pub(crate) fn csrf(&self) -> &str {
+        &self.csrf
+    }
     pub(crate) fn guid(&self) -> String {
         self.identity
             .0
@@ -670,7 +673,7 @@ mod tests {
                 .route("/", get(|| async { "private" }))
                 .route("/api/state", get(crate::handlers::api_state))
                 .route("/healthz", get(|| async { "ok" }))
-                .merge(crate::console::routes(true))
+                .merge(crate::console::routes(true, true))
                 .merge(crate::management::routes())
                 .merge(routes())
                 .layer(axum::middleware::from_fn(guard))
@@ -763,6 +766,15 @@ mod tests {
             .split('"')
             .next()
             .unwrap();
+        let console = server
+            .request("/console/services", &cookie)
+            .await
+            .text()
+            .await
+            .unwrap();
+        assert!(console.contains(&format!("data-csrf=\"{csrf}\"")));
+        assert!(console.contains("data-run-identity"));
+        assert!(console.contains("/assets/operations.js"));
         let url = format!("{}/api/operations/identity-check", server.origin);
         for (origin, supplied, extra, expected) in [
             ("https://other.invalid", csrf, false, StatusCode::FORBIDDEN),

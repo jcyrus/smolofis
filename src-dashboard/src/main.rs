@@ -88,6 +88,10 @@ async fn main() -> anyhow::Result<()> {
         "smolofis-panel starting"
     );
 
+    let management_enabled = std::env::var("SMOLOFIS_MANAGEMENT_ENABLED")
+        .unwrap_or_else(|_| "false".to_owned())
+        .parse::<bool>()
+        .context("SMOLOFIS_MANAGEMENT_ENABLED requires true or false")?;
     let state = Arc::new(system::AppState::new(config.clone()));
     system::spawn_poller(Arc::clone(&state));
 
@@ -97,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/healthz", get(handlers::healthz))
         .route("/assets/app.css", get(handlers::asset_css))
         .route("/assets/fonts/{file}", get(handlers::asset_font))
-        .merge(console::routes(config.console_enabled));
+        .merge(console::routes(config.console_enabled, management_enabled));
     let auth_config = if private_preview {
         Some(std::ffi::OsString::from("/etc/smolofis/panel-auth.json"))
     } else {
@@ -110,10 +114,6 @@ async fn main() -> anyhow::Result<()> {
     } else {
         std::env::var_os("SMOLOFIS_AUTH_STATE")
     };
-    let management_enabled = std::env::var("SMOLOFIS_MANAGEMENT_ENABLED")
-        .unwrap_or_else(|_| "false".to_owned())
-        .parse::<bool>()
-        .context("SMOLOFIS_MANAGEMENT_ENABLED requires true or false")?;
     anyhow::ensure!(
         !management_enabled || (auth_config.is_some() && auth_state.is_some()),
         "management requires configured authentication and device enrollment"

@@ -716,3 +716,38 @@ preserving the original bytes. A socket timeout may occur while its blocking
 commit finishes; an execution permit remains held until that work ends. No
 automatic retry is performed by the API. Production runs dev.82 with
 administration disabled.
+
+### Console identity checks
+
+With the management preview enabled, the Service health page includes Server
+checks and Recent operations. Run identity check uses the authenticated session's
+CSRF token. Expand a history row for the result, operation reference and
+administrator ID. Root-run records appear as Local administrator.
+
+The browser retains previous history if the worker becomes unavailable and
+disables submissions until history loads successfully. Queued/running records
+block new submissions. After a submission loses its response, the result remains
+uncertain: refresh history to inspect it before reloading the page for another
+check. Refresh never resubmits the POST. Interrupted records require the local
+recovery workflow above; a history refresh does not recover or replay work.
+
+Browser validation uses the ignored synthetic directory fixture and mocked
+operation responses; it does not replace native worker or TLS acceptance. To
+reproduce, install Playwright in a temporary directory and run the fixture:
+
+```sh
+cd src-dashboard
+SMOLOFIS_AUTH_BROWSER_ORIGIN_FILE=/private/tmp/smolofis-operation-browser-origin \
+  cargo test --locked auth::tests::browser_fixture -- --ignored --nocapture
+```
+
+In another terminal, from the repository root:
+
+```sh
+SMOLOFIS_PLAYWRIGHT_MODULE=/path/to/node_modules/playwright \
+  node scripts/dev/check-operation-ui.cjs
+```
+
+Use `SMOLOFIS_BROWSER_EXECUTABLE` to select an installed Chromium executable.
+Stop the fixture with Ctrl-C after testing. Screenshots and the scoped report
+are written to `.impeccable/review/operations/`.
