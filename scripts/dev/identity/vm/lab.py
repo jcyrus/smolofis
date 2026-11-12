@@ -185,6 +185,15 @@ def main():
         with Path(__file__).with_name('verify-audit-archive.py').open('rb') as source:
             run(ssh_args()+['sudo -n tee /opt/smolofis-identity-lab/vm/verify-audit-archive.py >/dev/null'], stdin=source)
         run(ssh_args()+['sudo -n python3 /opt/smolofis-identity-lab/vm/verify-audit-archive.py'])
+    elif action == 'check-office-bootstrap':
+        PORT = '12223'
+        base = '/opt/smolofis-office-bootstrap-lab'
+        run(ssh_args()+[f'sudo -n install -d -m 0755 {base}'])
+        for source, name in ((REPO / 'scripts/directory/bootstrap.py', 'bootstrap.py'),
+                             (Path(__file__).with_name('verify-office-bootstrap.py'), 'verify.py')):
+            with source.open('rb') as stream:
+                run(ssh_args()+[f'sudo -n tee {base}/{name} >/dev/null'], stdin=stream)
+        run(ssh_args()+[f'sudo -n python3 {base}/verify.py'])
     elif action == 'check-production-preflight':
         PORT = '12223'
         binary = STATE / 'panel-production-preflight'
@@ -388,7 +397,7 @@ def main():
     elif action == 'status':
         run(['docker','ps','--all','--filter',f'name=^/{NAME}$','--format','{{.Names}} {{.Status}} {{.Ports}}'])
     else:
-        raise SystemExit('usage: lab.py up|status|ssh <command>|provision|services|check-services|check-local-audit|check-web-audit|check-service-sandbox|check-management-sandbox|check-operation-receipts|check-operation-history|check-operation-listing|check-operation-journal|check-management-api|check-production-preflight|check-receipt-preservation|check-receipt-faults|check-enrollment-faults|check-audit-archive|check-archive-sync|check-audit-workflow|check-audit-lifecycle-gate|check-machine-id|prepare-private-https|stop|restore|restored-ssh <command>')
+        raise SystemExit('usage: lab.py up|status|ssh <command>|provision|services|check-services|check-local-audit|check-web-audit|check-service-sandbox|check-management-sandbox|check-operation-receipts|check-operation-history|check-operation-listing|check-operation-journal|check-management-api|check-production-preflight|check-office-bootstrap|check-receipt-preservation|check-receipt-faults|check-enrollment-faults|check-audit-archive|check-archive-sync|check-audit-workflow|check-audit-lifecycle-gate|check-machine-id|prepare-private-https|stop|restore|restored-ssh <command>')
 
 if __name__ == '__main__':
     main()
