@@ -90,6 +90,59 @@ impl AdDirectory {
         })
     }
 
+    /// Read-only setup probe: bind the reader, verify its naming context and group.
+    pub(crate) async fn probe(&self) -> Result<(), ()> {
+        let mut ldap = self.connect().await?;
+        ldap.simple_bind(&self.config.reader_dn, &self.reader_password)
+            .await
+            .map_err(|_| ())?
+            .success()
+            .map_err(|_| ())?;
+        let (entries, _) = ldap
+            .with_search_options(SearchOptions::new().sizelimit(1).timelimit(3))
+            .search(
+                "",
+                Scope::Base,
+                "(objectClass=*)",
+                vec!["defaultNamingContext"],
+            )
+            .await
+            .map_err(|_| ())?
+            .success()
+            .map_err(|_| ())?;
+        if entries.len() != 1 {
+            return Err(());
+        }
+        let entry = SearchEntry::construct(entries.into_iter().next().ok_or(())?);
+        let contexts = entry
+            .attrs
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("defaultNamingContext"))
+            .map(|(_, values)| values);
+        if !contexts.is_some_and(|values| {
+            values.len() == 1 && values[0].eq_ignore_ascii_case(&self.config.base_dn)
+        }) {
+            return Err(());
+        }
+        let (groups, _) = ldap
+            .with_search_options(SearchOptions::new().sizelimit(1).timelimit(3))
+            .search(
+                &self.config.admin_group_dn,
+                Scope::Base,
+                "(objectClass=group)",
+                vec!["1.1"],
+            )
+            .await
+            .map_err(|_| ())?
+            .success()
+            .map_err(|_| ())?;
+        let _ = ldap.unbind().await;
+        if groups.len() != 1 {
+            return Err(());
+        }
+        Ok(())
+    }
+
     async fn connect(&self) -> Result<Ldap, ()> {
         let settings = LdapConnSettings::new()
             .set_config(self.tls.clone())

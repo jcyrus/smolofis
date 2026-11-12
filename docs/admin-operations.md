@@ -697,7 +697,7 @@ were cleaned up.
 
 The backend transport test used private loopback HTTP with an HTTPS origin and
 manually supplied Secure cookies, modeling the existing HTTPS proxy boundary.
-Actual public TLS for these new API routes remains an acceptance task. The
+Actual public TLS for these new API routes subsequently passed in the exact-artifact acceptance recorded below. The
 actual hardened systemd units and new management/journal drop-ins passed 11
 checks, including attributed execution, successful synced transitions, worker
 restart persistence, outage preservation and denial of direct backend access to
@@ -751,3 +751,43 @@ SMOLOFIS_PLAYWRIGHT_MODULE=/path/to/node_modules/playwright \
 Use `SMOLOFIS_BROWSER_EXECUTABLE` to select an installed Chromium executable.
 Stop the fixture with Ctrl-C after testing. Screenshots and the scoped report
 are written to `.impeccable/review/operations/`.
+
+### Exact-artifact HTTPS acceptance — 2026-11-11
+
+PR #26 head `38a6a3875f5e09a4d3bb9ff8f40e76bb2f4a291c` passed CI run
+`42982628507`, including the ISO, smoke and BIOS/UEFI install/upgrade checks.
+The CI artifact SHA256
+`fa81062af29562f8dc58b69979d6a2c3e4272d428621911e9e2701db0b287a8e`
+was staged in the isolated lab with its hardened console, root journal worker
+and foreground Tailscale Serve. Fifteen actual HTTPS peer checks passed with
+normal CA and hostname verification, real LDAPS, real worker execution and
+protected journal attribution. The user confirmed the phone/browser certificate,
+sign-in, identity check, saved result after refresh and sign-out steps all worked.
+
+Evidence: `/var/lib/smolofis-identity-machine-lab/private-https-409cb462/`,
+including `https-peer-report.json`, `ci-artifact.json`, the archived journal and
+final acceptance record. This clears PR #26's HTTPS publication gate; production
+administration remains disabled and requires its own integration acceptance.
+
+## Production dev.88 rollout — 2026-11-11
+
+The installed updater verified dev.88's trusted manifest signature and complete
+ISO SHA256 `9651bfbdbff47e29c4adbe3e53da94bfbf568bd045cb7788aaf21a7741c25447`.
+Backup `20261111T101057Z` completed before replacing system-b. All backup tar
+archives parsed, and the PostgreSQL dump table of contents listed successfully.
+The update was staged without reboot so backup inspection completed first.
+
+After reboot, dev.88 reached ready and the verifier promoted system-b with
+Result=success and ExecMainStatus=0. System-a/dev.82 remains available as the
+previous slot. Boot ID changed to `58389532-c3b6-4071-8449-10c00d779e7f`. Runtime and saved
+machine-ID hashes, repository paths and the Coolify user count (1) match
+the baseline. All prior containers returned running with healthy status wherever
+a health check exists; no failed systemd units remain. Gitea reports 28.2.0.
+
+Public dashboard and liveness return 200. Console, sign-in, operations API and
+console assets return 404; candidate administration units/auth/enrollment remain
+absent. No listeners exist on 8091 or 445. Tailscale remains NeedsLogin and Serve
+configuration is empty. Production administration is still disabled.
+
+Protected staging, baseline, backup reference, apply log and post-check results
+are retained under `/var/lib/smolofis/dev88-stage.hLzRfm/`.

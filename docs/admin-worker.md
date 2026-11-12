@@ -101,3 +101,11 @@ older-writer refusal. Eighty host tests passed with one manual fixture ignored.
 Actual execution of the candidate systemd drop-ins and new-route public HTTPS
 acceptance remain pending. The AF_UNIX worker trusts the configured panel UID
 for directory-session assertions and enforces the action allowlist independently.
+
+## Production prerequisite inventory
+
+The root-only candidate `smolofis-admin console-setup-check` reports missing
+identity, file-access, enrollment, audit/journal, unit-file/peer UID and private
+transport prerequisites without changing configuration or service state. See
+[production setup](admin-production-setup.md) for its 14 checks, limitations and
+the remaining native directory/install/enable workflow.

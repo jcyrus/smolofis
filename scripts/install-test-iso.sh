@@ -565,6 +565,15 @@ log "PASS  the installed system has a console login"
 guest "$FINAL_PASSWORD" "test -n \"\$XDG_RUNTIME_DIR\" && systemctl is-active user@1000.service" >/dev/null \
   || die "the installed system has no working PAM/systemd user session"
 log "PASS  the installed system has a working PAM/systemd user session"
+assert_setup_check_blocked() {
+  local report
+  if report="$(guest "$FINAL_PASSWORD" "sudo smolofis-admin console-setup-check 2>/dev/null")"; then
+    die "unconfigured production console incorrectly passed setup prerequisites"
+  fi
+  python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["schema"] == 1 and not r["prerequisites_passed"] and not r["administration_enabled_by_check"]; checks={c["id"]:c["passed"] for c in r["checks"]}; assert len(checks)==14 and not checks["directory_configuration"] and not checks["private_transport_prerequisites"]' <<<"$report" \
+    || die "setup readiness did not return the expected redacted blocked report"
+  log "PASS  packaged production readiness reports missing setup without enabling administration"
+}
 assert_administration_disabled() {
   local preview_path
   for preview_path in /console /auth/login /assets/console.css /assets/console.js; do
@@ -680,6 +689,7 @@ guest "$FINAL_PASSWORD" "sudo bash -s recover-journal" \
   || die "operation journal recovery/execution failed after signed update"
 log "PASS  operation journal recovers interrupted work and completes fresh identity check"
 assert_administration_disabled
+assert_setup_check_blocked
 
 
 guest "$FINAL_PASSWORD" "$APPLY" >/dev/null || die "second smolofis-update apply failed"
@@ -701,6 +711,7 @@ guest "$FINAL_PASSWORD" "sudo bash -s verify" \
   || die "audit history or enrollment changed across rollback"
 log "PASS  audit/checkpoint history and locked schema-v2 enrollment survive rollback"
 assert_administration_disabled
+assert_setup_check_blocked
 
 support_rc=0
 support_output="$(guest "$FINAL_PASSWORD" "sudo smolofis-support" 2>&1)" || support_rc=$?

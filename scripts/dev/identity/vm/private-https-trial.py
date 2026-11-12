@@ -18,6 +18,8 @@ BINARY = SOURCE / 'smolofis-panel'
 STATE = ROOT / 'private-https-trial.json'
 BACKEND = 'smolofis-console-preview.service'
 HTTPS = 'smolofis-console-https-preview.service'
+WORKER = 'smolofis-admin-worker.service'
+JOURNAL = Path('/var/lib/smolofis/operations')
 if (os.geteuid() != 0 or not Path('/etc/smolofis-m0-fullvm').exists()
         or not (ROOT / 'domain-ready').exists() or Path('/etc/smolofis-release').exists()
         or Path('/run/systemd/container').exists()
@@ -57,7 +59,7 @@ elif action == 'start-https':
     else:
         raise SystemExit('Foreground Serve session did not become visible')
     record['https_started'] = True
-    record['scope'] = 'User-confirmed personal tailnet; employee network-denial acceptance remains pending'
+    record['scope'] = 'User-confirmed personal tailnet; employee policy testing deferred by user decision'
     STATE.write_text(json.dumps(record, indent=2))
     (Path(record['evidence']) / 'serve-started.json').write_text(json.dumps(serve, indent=2))
     print('PASS: temporary foreground Serve session is active; mobile/TLS acceptance still pending')
@@ -71,7 +73,7 @@ elif action == 'stop':
         environment = {key: value for key, value in os.environ.items() if not key.startswith('SMOLOFIS_')}
         environment['SMOLOFIS_LOCAL_AUDIT_FILE'] = str(runtime / 'local.jsonl')
         required([str(BINARY), '--auth-lock', str(runtime / 'panel-enrollment.json')], env=environment)
-    for unit in (HTTPS, BACKEND):
+    for unit in (HTTPS, BACKEND, WORKER) if record.get('management') else (HTTPS, BACKEND):
         subprocess.run(['systemctl', 'stop', unit], capture_output=True, timeout=30)
         result = subprocess.run(['journalctl', '-u', unit, '--no-pager', '-n', '200'], capture_output=True)
         (evidence / (unit + '.journal')).write_bytes(result.stdout)
@@ -83,12 +85,19 @@ elif action == 'stop':
     (evidence / 'serve-after-stop.json').write_text(json.dumps(serve, indent=2))
     for target in record['created_units']:
         target = Path(target)
-        assert target.parent == Path('/run/systemd/system') and target.name in (BACKEND, HTTPS)
+        assert target.parent == Path('/run/systemd/system') and target.name in (BACKEND, HTTPS, WORKER)
         dropin = Path(str(target) + '.d')
         owned = dropin / '10-owned-lab.conf'
         if owned.exists():
             assert str(runtime) in owned.read_text()
-            owned.unlink(); dropin.rmdir()
+            owned.unlink()
+            for name in ('05-management.conf', '05-journal.conf'):
+                candidate = dropin / name
+                if candidate.exists():
+                    source = SOURCE / name.removeprefix('05-')
+                    assert candidate.read_bytes() == source.read_bytes()
+                    candidate.unlink()
+            dropin.rmdir()
         if target.exists(): target.unlink()
     required(['systemctl', 'daemon-reload'])
     for name in record['created_directory_users']:
@@ -106,7 +115,20 @@ elif action == 'stop':
             pass
         else:
             required(['groupdel', username])
+    if record.get('journal_owned') and JOURNAL.exists():
+        assert JOURNAL.is_dir() and not JOURNAL.is_symlink()
+        for path in JOURNAL.iterdir():
+            assert path.name in ('journal.json', 'journal.lock') and path.is_file() and not path.is_symlink()
+            shutil.copyfile(path, evidence / path.name)
+            path.unlink()
+        JOURNAL.rmdir()
+    if record.get('created_varlib'):
+        Path('/var/lib/smolofis').rmdir()
     if runtime.exists():
+        identity = runtime / 'identity'
+        if identity.exists():
+            (identity / 'machine-id').unlink()
+            identity.rmdir()
         for path in runtime.iterdir():
             assert path.is_file() and not path.is_symlink()
             path.unlink()
@@ -117,7 +139,8 @@ elif action == 'stop':
     (evidence / 'trial-record.json').write_text(json.dumps(record, indent=2))
     STATE.unlink()
     print('PASS: foreground Serve removed, enrollment locked, owned backend/config/users stopped and cleaned; evidence retained')
-elif action == 'prepare-backend':
+elif action in ('prepare-backend', 'prepare-management'):
+    management = action == 'prepare-management'
     if STATE.exists():
         raise SystemExit('Existing lab trial; inspect before replacing')
     password = sys.stdin.read().rstrip('\r\n')
@@ -126,11 +149,13 @@ elif action == 'prepare-backend':
     own = node.get('Self') or {}
     host = own.get('DNSName', '').rstrip('.')
     assert node.get('BackendState') == 'Running' and own.get('Online') and host.startswith('smolofis-m0-private.') and host.endswith('.ts.net')
-    for unit in (BACKEND, HTTPS):
+    for unit in ((BACKEND, HTTPS, WORKER) if management else (BACKEND, HTTPS)):
         for base in ('/etc/systemd/system', '/run/systemd/system', '/usr/lib/systemd/system'):
             assert not (Path(base) / unit).exists() and not (Path(base) / (unit + '.d')).exists()
     for path in ('/etc/smolofis/panel-auth.json', '/etc/smolofis/panel-enrollment.json'):
         assert not Path(path).exists() and not Path(path).is_symlink()
+    if management:
+        assert not JOURNAL.exists() and not JOURNAL.is_symlink() and not Path('/run/smolofis-admin').exists()
     assert BINARY.is_file()
     os.umask(0o077)
     suffix = secrets.token_hex(4)
@@ -143,7 +168,8 @@ elif action == 'prepare-backend':
               'evidence': str(evidence), 'backend_user': username,
               'admin': 'mobile-admin', 'nonadmin': 'mobile-user', 'group': 'M1-PrivateConsole',
               'created_units': [], 'created_directory_users': [], 'created_group': False,
-              'created_backend_user': False, 'created_etc': False,
+              'created_backend_user': False, 'created_etc': False, 'management': management,
+              'journal_owned': False, 'created_varlib': False,
               'binary_sha256': hashlib.file_digest(BINARY.open('rb'), 'sha256').hexdigest()}
     def save():
         STATE.write_text(json.dumps(record, indent=2)); STATE.chmod(0o600)
@@ -185,20 +211,37 @@ elif action == 'prepare-backend':
     etc = Path('/etc/smolofis')
     if not etc.exists():
         etc.mkdir(mode=0o755); etc.chmod(0o755); record['created_etc'] = True; save()
-    for unit in (BACKEND, HTTPS):
+    if management:
+        identity = runtime / 'identity'; identity.mkdir(mode=0o700)
+        shutil.copyfile('/etc/machine-id', identity / 'machine-id')
+        varlib = Path('/var/lib/smolofis')
+        if not varlib.exists():
+            varlib.mkdir(mode=0o755); varlib.chmod(0o755); record['created_varlib'] = True; save()
+        record['journal_owned'] = True; save()
+        required([str(BINARY), '--operation-init', str(JOURNAL)])
+    for unit in ((BACKEND, HTTPS, WORKER) if management else (BACKEND, HTTPS)):
         target = Path('/run/systemd/system') / unit
         shutil.copyfile(SOURCE / unit, target); target.chmod(0o644)
         record['created_units'].append(str(target)); save()
         dropin = Path(str(target) + '.d'); dropin.mkdir(mode=0o755); dropin.chmod(0o755)
         common = f'[Service]\nBindReadOnlyPaths={runtime}:/etc/smolofis\n'
+        if management and unit == BACKEND:
+            shutil.copyfile(SOURCE / 'management.conf', dropin / '05-management.conf')
+        if management and unit == WORKER:
+            shutil.copyfile(SOURCE / 'journal.conf', dropin / '05-journal.conf')
         if unit == BACKEND:
             text = common + (f'ExecStart=\nExecStart={BINARY} --private-console\nUser={username}\nGroup={username}\nRestart=no\n'
                              f'Environment=SMOLOFIS_AUDIT_FILE={http_audit}\nReadWritePaths={http_audit}\n')
+        elif unit == WORKER:
+            text = common + (f'ExecStart=\nExecStart={BINARY} --admin-worker /run/smolofis-admin/control.sock {account.pw_uid} {JOURNAL}\n'
+                             f'Group={username}\nRestart=no\nEnvironmentFile=\n')
         else:
             text = common + (f'ExecStartPre=\nExecStartPre={BINARY} --console-access-check /etc/smolofis/panel-auth.json /etc/smolofis/panel-enrollment.json\n')
         (dropin / '10-owned-lab.conf').write_text(text)
     required(['systemctl', 'daemon-reload'])
     required(['systemd-analyze', 'verify', '/run/systemd/system/' + BACKEND, '/run/systemd/system/' + HTTPS])
+    if management:
+        required(['systemctl', 'start', WORKER])
     required(['systemctl', 'start', BACKEND])
     required([str(BINARY), '--console-access-check', str(config), str(state)])
     (evidence / 'preflight.json').write_text(json.dumps({'passed': True, 'origin': record['origin'],
@@ -207,4 +250,4 @@ elif action == 'prepare-backend':
     print(json.dumps({'origin': record['origin'], 'admin': record['admin'], 'nonadmin': record['nonadmin'],
                       'evidence': str(evidence)}, indent=2))
 else:
-    raise SystemExit('usage: private-https-trial.py status|prepare-backend|start-https|stop')
+    raise SystemExit('usage: private-https-trial.py status|prepare-backend|prepare-management|start-https|stop')

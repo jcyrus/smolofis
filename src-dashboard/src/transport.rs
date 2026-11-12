@@ -35,7 +35,7 @@ pub(crate) fn private_host(origin: &str) -> Result<String> {
     Ok(host.to_owned())
 }
 
-fn validate_tailnet(node: &Value, serve: &Value, host: &str) -> Result<()> {
+pub(crate) fn validate_tailnet(node: &Value, serve: &Value, host: &str) -> Result<()> {
     anyhow::ensure!(
         node.get("BackendState").and_then(Value::as_str) == Some("Running")
             && node.pointer("/Self/Online").and_then(Value::as_bool) == Some(true),
@@ -68,7 +68,7 @@ fn validate_tailnet(node: &Value, serve: &Value, host: &str) -> Result<()> {
     Ok(())
 }
 
-async fn tailscale_json(args: &[&str]) -> Result<Value> {
+pub(crate) async fn tailscale_json(args: &[&str]) -> Result<Value> {
     tokio::time::timeout(COMMAND_TIMEOUT, async {
         let mut child = tokio::process::Command::new("/usr/bin/tailscale")
             .args(args)

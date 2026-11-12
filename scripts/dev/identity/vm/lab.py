@@ -185,6 +185,26 @@ def main():
         with Path(__file__).with_name('verify-audit-archive.py').open('rb') as source:
             run(ssh_args()+['sudo -n tee /opt/smolofis-identity-lab/vm/verify-audit-archive.py >/dev/null'], stdin=source)
         run(ssh_args()+['sudo -n python3 /opt/smolofis-identity-lab/vm/verify-audit-archive.py'])
+    elif action == 'check-production-preflight':
+        PORT = '12223'
+        binary = STATE / 'panel-production-preflight'
+        header = binary.read_bytes()[:20]
+        if header[:4] != b'\x7fELF' or int.from_bytes(header[18:20], 'little') != 62:
+            raise SystemExit('Build the Linux x86_64 production-preflight candidate first')
+        base = '/opt/smolofis-production-preflight-lab'
+        run(ssh_args()+[f'sudo -n install -d -m 0755 {base}'])
+        files = [(binary, 'smolofis-panel'), (Path(__file__).with_name('verify-production-preflight.py'), 'verify.py')]
+        for unit in ('smolofis-console-preview.service', 'smolofis-console-https-preview.service', 'smolofis-admin-worker.service',
+                     'smolofis-console-preview.service.d/audit.conf', 'smolofis-console-preview.service.d/management.conf',
+                     'smolofis-admin-worker.service.d/journal.conf'):
+            files.append((REPO / 'config/systemd' / unit, 'units/' + unit))
+        for source, name in files:
+            target = base + '/' + name
+            run(ssh_args()+[f'sudo -n install -d -m 0755 {str(Path(target).parent)}'])
+            with source.open('rb') as stream:
+                run(ssh_args()+[f'sudo -n tee {target} >/dev/null'], stdin=stream)
+        run(ssh_args()+[f'sudo -n chmod 0755 {base}/smolofis-panel'])
+        run(ssh_args()+[f'sudo -n python3 {base}/verify.py'])
     elif action == 'check-management-api':
         PORT = '12223'
         binary = STATE / 'panel-management-api'
@@ -368,7 +388,7 @@ def main():
     elif action == 'status':
         run(['docker','ps','--all','--filter',f'name=^/{NAME}$','--format','{{.Names}} {{.Status}} {{.Ports}}'])
     else:
-        raise SystemExit('usage: lab.py up|status|ssh <command>|provision|services|check-services|check-local-audit|check-web-audit|check-service-sandbox|check-management-sandbox|check-operation-receipts|check-operation-history|check-operation-listing|check-operation-journal|check-management-api|check-receipt-preservation|check-receipt-faults|check-enrollment-faults|check-audit-archive|check-archive-sync|check-audit-workflow|check-audit-lifecycle-gate|check-machine-id|prepare-private-https|stop|restore|restored-ssh <command>')
+        raise SystemExit('usage: lab.py up|status|ssh <command>|provision|services|check-services|check-local-audit|check-web-audit|check-service-sandbox|check-management-sandbox|check-operation-receipts|check-operation-history|check-operation-listing|check-operation-journal|check-management-api|check-production-preflight|check-receipt-preservation|check-receipt-faults|check-enrollment-faults|check-audit-archive|check-archive-sync|check-audit-workflow|check-audit-lifecycle-gate|check-machine-id|prepare-private-https|stop|restore|restored-ssh <command>')
 
 if __name__ == '__main__':
     main()
