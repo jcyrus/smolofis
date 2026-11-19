@@ -1,0 +1,27 @@
+[Unit]
+Description=SmolOfis office directory
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=/var/lib/smolofis /etc/smolofis
+
+[Service]
+Type=exec
+UMask=0077
+RuntimeDirectory=smolofis-directory
+RuntimeDirectoryMode=0700
+TimeoutStartSec=120s
+PrivateTmp=yes
+ProtectHome=yes
+ExecStartPre=/usr/bin/python3 -I /usr/local/lib/smolofis/directory-bootstrap.py runtime-check
+ExecStart=/usr/sbin/samba --foreground --no-process-group \
+    --configfile=/var/lib/smolofis/directory/domain/etc/smb.conf \
+    "--option=pid directory=/run/smolofis-directory" \
+    "--option=old password allowed period=0" \
+    "--option=tls enabled=yes" \
+    "--option=tls cafile=/etc/smolofis/directory-tls/ca.pem" \
+    "--option=tls certfile=/etc/smolofis/directory-tls/cert.pem" \
+    "--option=tls keyfile=/etc/smolofis/directory-tls/key.pem"
+ExecStartPost=/usr/bin/python3 -I /usr/local/lib/smolofis/directory-bootstrap.py runtime-probe
+
+[Install]
+WantedBy=multi-user.target

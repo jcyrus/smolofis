@@ -178,7 +178,7 @@ fn saved_identity() -> Result<()> {
 async fn directory_service_active() -> bool {
     tokio::time::timeout(Duration::from_secs(5), async {
         tokio::process::Command::new("/usr/bin/systemctl")
-            .args(["is-active", "--quiet", "samba-ad-dc.service"])
+            .args(["is-active", "--quiet", "smolofis-directory.service"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())

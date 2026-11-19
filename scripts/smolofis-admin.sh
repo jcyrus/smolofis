@@ -13,6 +13,7 @@
 #   systemd-ask-password 'Office admin password:' | sudo smolofis-admin console-enroll username
 #   sudo smolofis-admin console-status|console-lock
 #   sudo smolofis-admin console-audit-init|console-audit-archive
+#   sudo smolofis-admin directory-prepare|directory-status
 
 set -euo pipefail
 
@@ -158,6 +159,10 @@ select_local_audit() {
 }
 
 case "${1:-}" in
+    directory-prepare|directory-status)
+        [[ $# -eq 1 ]] || die "this command takes no additional arguments"
+        exec /usr/bin/python3 -I /usr/local/lib/smolofis/directory-bootstrap.py "${1#directory-}"
+        ;;
     console-setup-check)
         [[ $# -eq 1 ]] || die "this command takes no additional arguments"
         exec /usr/local/bin/smolofis-panel --console-setup-check
@@ -235,7 +240,7 @@ case "${1:-}" in
         log "time zone is ${zone}; nightly backups now run around 03:00 local time"
         ;;
     *)
-        echo "usage: smolofis-admin provision|show|timezone <zone>|console-enroll <username>|console-status|console-lock|console-operation-status <operation-id>|console-operation-list|console-job-init|console-job-run|console-job-status <operation-id>|console-job-list|console-job-recover|console-access-check|console-setup-check|console-audit-init|console-audit-archive" >&2
+        echo "usage: smolofis-admin provision|show|timezone <zone>|directory-prepare|directory-status|console-enroll <username>|console-status|console-lock|console-operation-status <operation-id>|console-operation-list|console-job-init|console-job-run|console-job-status <operation-id>|console-job-list|console-job-recover|console-access-check|console-setup-check|console-audit-init|console-audit-archive" >&2
         exit 2
         ;;
 esac

@@ -205,6 +205,7 @@ run_in_chroot "apt-get install -y --no-install-recommends \
     iproute2 \
     whiptail \
     nftables \
+    openssl \
     rsync"
 
 # ---------------------------------------------------------------------------
@@ -239,6 +240,26 @@ deb [signed-by=/etc/apt/keyrings/tailscale.gpg] https://pkgs.tailscale.com/stabl
 EOF
 
 run_in_chroot "apt-get update && apt-get install -y --no-install-recommends tailscale"
+
+# Ship Samba and the provision templates without enabling Debian's global
+# Samba services. Office directory startup will use appliance-specific config.
+log "stage 3c/8: offline office directory runtime"
+SAMBA_UNITS=(samba-ad-dc.service smbd.service nmbd.service winbind.service)
+# Package hooks may use SysV init scripts when the chroot has no systemd.
+SAMBA_INSTALL_POLICY="${ROOTFS}/usr/sbin/policy-rc.d"
+(set -o noclobber; cat > "${SAMBA_INSTALL_POLICY}" <<'EOF'
+#!/bin/sh
+exit 101
+EOF
+) || die "could not create the temporary Samba package start policy"
+chmod 0755 "${SAMBA_INSTALL_POLICY}"
+if ! run_in_chroot "apt-get install -y --no-install-recommends samba-ad-dc samba-ad-provision"; then
+    rm "${SAMBA_INSTALL_POLICY}"
+    die "could not install the Samba provisioning packages"
+fi
+rm "${SAMBA_INSTALL_POLICY}"
+systemctl --root="${ROOTFS}" disable "${SAMBA_UNITS[@]}"
+systemctl --root="${ROOTFS}" mask "${SAMBA_UNITS[@]}"
 
 # ---------------------------------------------------------------------------
 # Stage 4 — appliance identity
@@ -314,6 +335,9 @@ install -o root -g root -m 0644 "${REPO_ROOT}/config/release/allowed_signers" "$
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-backup.sh" "${ROOTFS}/usr/local/bin/smolofis-backup"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-admin.sh" "${ROOTFS}/usr/local/bin/smolofis-admin"
 install -o root -g root -m 0755 "${SCRIPT_DIR}/smolofis-identity.sh" "${ROOTFS}/usr/local/bin/smolofis-identity"
+install -d -o root -g root -m 0755 "${ROOTFS}/usr/local/lib/smolofis"
+install -o root -g root -m 0644 "${SCRIPT_DIR}/directory/bootstrap.py" \
+    "${ROOTFS}/usr/local/lib/smolofis/directory-bootstrap.py"
 
 # systemd orchestration units.
 install -o root -g root -m 0644 \
@@ -329,6 +353,7 @@ install -o root -g root -m 0644 \
     "${REPO_ROOT}/config/systemd/smolofis-identity.service" \
     "${REPO_ROOT}/config/systemd/smolofis-identity-save.service" \
     "${REPO_ROOT}/config/systemd/smolofis-identity-save.path" \
+    "${REPO_ROOT}/config/systemd/smolofis-directory.service" \
     "${ROOTFS}/etc/systemd/system/"
 
 # Recover from hangs. softdog stands in on boards without a hardware watchdog.

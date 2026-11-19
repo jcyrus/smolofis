@@ -588,6 +588,15 @@ assert_administration_disabled() {
 }
 assert_administration_disabled
 
+assert_directory_services_masked() {
+  guest "$FINAL_PASSWORD" "set -e
+    for unit in samba-ad-dc smbd nmbd winbind; do
+      state=\$(systemctl is-enabled \"\$unit.service\" || true)
+      test \"\$state\" = masked
+      if systemctl is-active --quiet \"\$unit.service\"; then exit 1; fi
+    done" || die "a distribution Samba service is active or unmasked"
+}
+
 guest "$FINAL_PASSWORD" "sudo smolofis-admin timezone Asia/Ho_Chi_Minh" >/dev/null || die "could not set the time zone"
 if guest "$FINAL_PASSWORD" "sudo smolofis-admin timezone Nowhere/Invalid" >/dev/null 2>&1; then
   die "an unknown time zone was accepted"
@@ -628,6 +637,47 @@ guest "$FINAL_PASSWORD" "docker exec app-data-test cat /data/value" | grep -qx k
 guest "$FINAL_PASSWORD" "docker rm -f app-data-test && docker volume rm app-data-test" >/dev/null
 wait_ready "after restoring app data"
 log "PASS  backup and restore cover deployed apps' data"
+
+# Prepare an offline test domain on the installed data filesystem before the
+# signed update. The appliance runtime stays disabled throughout this check.
+assert_directory_services_masked
+if guest "$FINAL_PASSWORD" "smolofis-admin directory-prepare" >/dev/null 2>&1; then
+  die "unprivileged offline directory preparation was accepted"
+fi
+directory_state_hash="$(guest "$FINAL_PASSWORD" "sudo bash -se" <<'EOF'
+umask 077
+plan=/etc/smolofis/directory-plan.json
+data=/var/lib/smolofis/directory
+test ! -e "$plan"
+test ! -e "$data"
+test ! -L "$data"
+before=$(sha256sum /etc/resolv.conf /etc/hosts /etc/samba/smb.conf)
+(set -o noclobber; cat > "$plan" <<'JSON'
+{"version":1,"dns_domain":"office.smolofis.test","short_domain":"SMOLOFIS","hostname":"smolofis-dc","address":"192.168.254.10","forwarder":null}
+JSON
+)
+if absent=$(smolofis-admin directory-status); then exit 1; fi
+python3 -c 'import json,sys; assert json.load(sys.stdin)["phase"] == "absent"' <<< "$absent"
+test ! -e "$data"
+prepared=$(smolofis-admin directory-prepare)
+python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["phase"] == "prepared" and not r["service_started_by_command"] and not r["dns_changed_by_command"]' <<< "$prepared"
+test "$prepared" = "$(smolofis-admin directory-prepare)"
+test "$prepared" = "$(smolofis-admin directory-status)"
+samba-tool ntacl sysvolcheck --configfile="$data/domain/etc/smb.conf" >&2
+test "$before" = "$(sha256sum /etc/resolv.conf /etc/hosts /etc/samba/smb.conf)"
+sha256sum "$data/bootstrap-state.json"
+EOF
+)" || die "packaged offline directory preparation failed"
+log "PASS  packaged offline directory preparation is repeatable and preserves host DNS and Samba configuration"
+
+assert_directory_state_preserved() {
+  assert_directory_services_masked
+  guest "$FINAL_PASSWORD" "sudo smolofis-admin directory-status && sudo samba-tool ntacl sysvolcheck --configfile=/var/lib/smolofis/directory/domain/etc/smb.conf" >/dev/null \
+    || die "prepared directory or SYSVOL ACLs are unavailable"
+  [[ "$(guest "$FINAL_PASSWORD" "sudo sha256sum /var/lib/smolofis/directory/bootstrap-state.json")" == "$directory_state_hash" ]] \
+    || die "prepared directory identity changed"
+  log "PASS  prepared directory identity and SYSVOL ACLs survive boot with Samba services masked"
+}
 
 # A locked synthetic enrollment exercises persistent schema-v2 receipts and
 # archived/checkpoint-only history without configuring directory access or enabling the console.
@@ -690,6 +740,7 @@ guest "$FINAL_PASSWORD" "sudo bash -s recover-journal" \
 log "PASS  operation journal recovers interrupted work and completes fresh identity check"
 assert_administration_disabled
 assert_setup_check_blocked
+assert_directory_state_preserved
 
 
 guest "$FINAL_PASSWORD" "$APPLY" >/dev/null || die "second smolofis-update apply failed"
@@ -712,6 +763,54 @@ guest "$FINAL_PASSWORD" "sudo bash -s verify" \
 log "PASS  audit/checkpoint history and locked schema-v2 enrollment survive rollback"
 assert_administration_disabled
 assert_setup_check_blocked
+assert_directory_state_preserved
+
+# gitea and other services keep their normal network; use a temporary directory
+# address on a dummy interface for the live DNS and LDAPS acceptance check.
+guest "$FINAL_PASSWORD" "sudo bash -se" <<'EOF' || die "live directory acceptance failed"
+umask 077
+unit=smolofis-directory.service
+tls=/etc/smolofis/directory-tls
+hostname=smolofis-dc.office.smolofis.test
+test "$(systemctl is-enabled "$unit" || true)" = disabled
+test ! -e "$tls"
+test ! -L "$tls"
+work=$(mktemp -d)
+ip link add smolofis-adtest type dummy
+cleanup() {
+    systemctl stop "$unit"
+    ip link del smolofis-adtest
+    rm -rf "$work" "$tls"
+}
+trap cleanup EXIT
+ip addr add 192.168.254.10/32 dev smolofis-adtest
+ip link set smolofis-adtest up
+if systemctl start "$unit"; then exit 1; fi
+if systemctl is-active --quiet "$unit"; then exit 1; fi
+systemctl reset-failed "$unit"
+install -d -m 0700 "$tls"
+openssl req -new -newkey rsa:2048 -nodes -x509 -days 2 -subj '/CN=SmolOfis ISO fixture CA' \
+    -addext 'keyUsage=critical,keyCertSign,cRLSign' \
+    -keyout "$work/ca.key" -out "$tls/ca.pem" >/dev/null 2>&1
+openssl req -new -newkey rsa:2048 -nodes -subj "/CN=$hostname" \
+    -keyout "$tls/key.pem" -out "$work/server.csr" >/dev/null 2>&1
+printf 'subjectAltName=DNS:%s\nextendedKeyUsage=serverAuth\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n' \
+    "$hostname" > "$work/extensions"
+openssl x509 -req -in "$work/server.csr" -CA "$tls/ca.pem" -CAkey "$work/ca.key" \
+    -CAserial "$work/ca.srl" -CAcreateserial -days 1 -extfile "$work/extensions" \
+    -out "$tls/cert.pem" >/dev/null 2>&1
+chmod 0600 "$tls"/*.pem
+chmod 0644 "$tls/key.pem"
+if systemctl start "$unit"; then exit 1; fi
+chmod 0600 "$tls/key.pem"
+systemctl reset-failed "$unit"
+systemctl start "$unit"
+systemctl is-active --quiet "$unit"
+systemctl stop "$unit"
+if systemctl is-active --quiet "$unit"; then exit 1; fi
+EOF
+assert_directory_services_masked
+log "PASS  office directory requires trusted TLS material and serves verified LDAPS and DNS when explicitly started"
 
 support_rc=0
 support_output="$(guest "$FINAL_PASSWORD" "sudo smolofis-support" 2>&1)" || support_rc=$?

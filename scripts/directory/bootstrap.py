@@ -13,9 +13,12 @@ import os
 from pathlib import Path
 import re
 import secrets
+import socket
+import ssl
 import stat
 import subprocess
 import sys
+import time
 import uuid
 
 sys.dont_write_bytecode = True
@@ -24,6 +27,7 @@ BASE = ROOT / 'directory'
 PLAN = Path('/etc/smolofis/directory-plan.json')
 STATE = BASE / 'bootstrap-state.json'
 LOCK = ROOT / '.directory-bootstrap.lock'
+TLS = Path('/etc/smolofis/directory-tls')
 PRIVATE_NETWORKS = tuple(ipaddress.IPv4Network(value) for value in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'))
 
 
@@ -263,9 +267,82 @@ def summary(state):
             'service_started_by_command': False, 'dns_changed_by_command': False}
 
 
+def check_runtime(plan):
+    from samba.param import LoadParm
+
+    samba_api()
+    with lock(create=False):
+        require(status_unlocked(plan)['phase'] == 'prepared', 'Prepare the office directory first')
+    config = BASE / 'domain/etc/smb.conf'
+    trusted(config)
+    settings = LoadParm()
+    settings.load(str(config))
+    require(settings.get('bind interfaces only')
+            and set(settings.get('interfaces')) == {'lo', plan['address'] + '/32'}
+            and settings.get('server role') == 'active directory domain controller',
+            'Directory configuration differs from the prepared service policy')
+
+    addresses = subprocess.run(['/usr/sbin/ip', '-j', '-4', 'addr', 'show', 'up', 'scope', 'global'],
+                               capture_output=True, check=True, timeout=5)
+    matches = [address for interface in json.loads(addresses.stdout) for address in interface['addr_info']
+               if address['local'] == plan['address']]
+    require(len(matches) == 1, 'The planned directory address must be assigned to one active interface')
+
+    trusted(TLS, directory=True, private=True)
+    for name in ('ca.pem', 'cert.pem', 'key.pem'):
+        trusted(TLS / name, private=True)
+    name = f"{plan['hostname']}.{plan['dns_domain']}"
+    subprocess.run(['/usr/bin/openssl', 'verify', '-x509_strict', '-no-CApath', '-no-CAstore', '-CAfile', str(TLS / 'ca.pem'),
+                    '-purpose', 'sslserver', '-verify_hostname', name, str(TLS / 'cert.pem')],
+                   capture_output=True, check=True, timeout=5)
+    # Loading the pair also checks that the unencrypted key matches the leaf.
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(TLS / 'cert.pem', TLS / 'key.pem', password='')
+
+
+def probe_runtime(plan):
+    import dns.exception
+    import dns.message
+    import dns.query
+    import dns.rdatatype
+
+    name = f"{plan['hostname']}.{plan['dns_domain']}"
+    context = ssl.create_default_context(cafile=str(TLS / 'ca.pem'))
+    context.hostname_checks_common_name = False
+    service_request = dns.message.make_query(f"_ldap._tcp.{plan['dns_domain']}.", 'SRV')
+    address_request = dns.message.make_query(name + '.', 'A')
+    deadline = time.monotonic() + 90
+    step = 'LDAPS'
+    failure = ''
+    while time.monotonic() < deadline:
+        try:
+            step = 'LDAPS'
+            with socket.create_connection((plan['address'], 636), timeout=2) as connection:
+                with context.wrap_socket(connection, server_hostname=name):
+                    pass
+            step = 'DNS'
+            for query in (dns.query.udp, dns.query.tcp):
+                service = query(service_request, plan['address'], timeout=2)
+                require(any(record.port == 389 and record.target.to_text().lower() == name + '.'
+                            for data in service.answer if data.rdtype == dns.rdatatype.SRV for record in data),
+                        'Directory DNS is missing its LDAP service record')
+                address = query(address_request, plan['address'], timeout=2)
+                require({record.address for data in address.answer if data.rdtype == dns.rdatatype.A for record in data}
+                        == {plan['address']}, 'Directory DNS advertises an unexpected address')
+            return 0
+        except ssl.SSLCertVerificationError as error:
+            failure = error.verify_message
+            time.sleep(1)
+        except (OSError, ValueError, dns.exception.DNSException) as error:
+            failure = type(error).__name__
+            time.sleep(1)
+    print(f'Directory {step} did not become ready at the planned address ({failure}).', file=sys.stderr)
+    return 1
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('prepare', 'status'))
+    parser.add_argument('command', choices=('prepare', 'status', 'runtime-check', 'runtime-probe'))
     args = parser.parse_args()
     require(os.geteuid() == 0, 'Local root access required')
     os.umask(0o077)
@@ -274,6 +351,11 @@ def main():
     filesystem = subprocess.run(['/usr/bin/findmnt', '-n', '-o', 'FSTYPE', '--mountpoint', str(ROOT)], capture_output=True, text=True, timeout=5, check=True).stdout.strip()
     require(filesystem in ('ext4', 'xfs', 'btrfs'), 'Validated native ACL-capable data filesystem required')
     plan = validate_plan(read_json(PLAN))
+    if args.command == 'runtime-check':
+        check_runtime(plan)
+        return 0
+    if args.command == 'runtime-probe':
+        return probe_runtime(plan)
     if args.command == 'prepare':
         state = prepare(plan)
     elif not BASE.exists() and not BASE.is_symlink():
@@ -290,5 +372,8 @@ if __name__ == '__main__':
     try:
         raise SystemExit(main())
     except Exception:
-        print('Directory bootstrap refused or incomplete; inspect protected setup state and prerequisites.', file=sys.stderr)
+        if len(sys.argv) == 2 and sys.argv[1] in ('runtime-check', 'runtime-probe'):
+            print('Directory runtime check failed; inspect the prepared state, address, DNS and LDAPS material.', file=sys.stderr)
+        else:
+            print('Directory bootstrap refused or incomplete; inspect protected setup state and prerequisites.', file=sys.stderr)
         raise SystemExit(1)

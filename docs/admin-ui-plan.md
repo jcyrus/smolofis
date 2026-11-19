@@ -425,4 +425,13 @@ failures and never log credentials.
 - [x] Preserve existing prepared identity/data on identical re-entry; reject changed plans, foreign identity, unsafe/missing artifacts and automatic replay of failed/interrupted work. Failed private evidence stays retained.
 - [x] Pass five host plan tests and 12 final native ext4 checks, including actual AD provisioning/SYSVOL ACLs, credential privacy, unchanged global state, idempotence, unsafe secret modes, failure retention and SIGKILL/no-replay. Evidence: `office-bootstrap-39ae454a07`. Temporary test markers/mounts removed; production remains dev.88 with administration disabled.
 - [x] Open draft [PR #28](https://github.com/jcyrus/smolofis/pull/28) for the offline bootstrap candidate, based on PR #27.
-- [ ] Pass PR #28 CI and merge PR #27 first. Native package/image integration, live DNS and LDAPS certificate lifecycle, reader/admin users, backups/restore and reboot/upgrade/fallback still gate production use.
+- [x] Merge PRs #27 and #28. [Main CI](https://github.com/jcyrus/smolofis/actions/runs/43157156964) passed ISO smoke, BIOS/UEFI install and publication for dev.94.
+
+### Appliance packaging and acceptance
+
+- [x] Include Samba and the offline root-only preparation/status commands in the image. Mask distribution Samba units and keep console enablement gated.
+- [x] Validate the package step in a disposable Debian trixie amd64 container. Installation, all four service masks, the Samba 4.22 Python API, and the packaged CLI checks passed.
+- [ ] Pass BIOS/UEFI installed-image coverage for the packaged bootstrap, preserved directory identity and SYSVOL ACLs across signed update and fallback.
+- [x] Add an opt-in directory service that requires prepared state, the assigned address, and a private CA and server key. Startup verifies LDAPS and the directory DNS records before reporting ready.
+- [x] Verify explicit start/stop in a disposable native Debian VM. Missing TLS material and an overly permissive server key were rejected. Valid TLS, the LDAP SRV record, and the planned IPv4 record passed readiness checks.
+- [ ] Validate the directory service in the installed BIOS/UEFI workflows, establish production DNS and certificate renewal, provision the reader and administrator group, and complete backup and restore. Enable the production console only after the full v1 acceptance gates pass.

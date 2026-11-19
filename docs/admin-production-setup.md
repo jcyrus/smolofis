@@ -95,5 +95,5 @@ ready, candidate units remained absent and administration endpoints stayed 404.
 Evidence: `/var/lib/smolofis/console-preflight-preview.LUlYNZ/`. The installed
 panel was not replaced and remains dev.88.
 
-Installed-image acceptance is wired to check the packaged command after signed
-BIOS/UEFI upgrade and fallback; its full CI result remains pending.
+Main CI for dev.94 passed the BIOS/UEFI installed-image workflow, including the
+packaged preflight check after signed upgrade and fallback.

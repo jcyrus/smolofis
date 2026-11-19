@@ -1,9 +1,11 @@
-# Offline native office directory bootstrap candidate
+# Offline native office directory bootstrap
 
-`scripts/directory/bootstrap.py` prepares an isolated native Samba AD data tree.
-It is a repository candidate and is not installed or called by appliance images.
-It starts no service, changes no resolver/host configuration, and exposes no new
-ports. Production remains dev.88 with administration disabled.
+`sudo smolofis-admin directory-prepare` prepares an isolated native Samba AD
+data tree on an installed appliance. `sudo smolofis-admin directory-status`
+reports the offline bootstrap state. The image ships the bootstrap and Samba
+provisioning packages with the distribution Samba units masked. Preparation
+leaves the host resolver and Samba service state untouched. Use a disposable
+installed test appliance until the lifecycle and recovery gates pass.
 
 The selected namespace is `office.smolofis.internal`, realm
 `OFFICE.SMOLOFIS.INTERNAL`, short domain `SMOLOFIS`. The directory controller's
@@ -12,7 +14,8 @@ This does not rename the appliance's existing LAN/mDNS identity.
 
 ## Fixed inputs and storage
 
-The candidate accepts only `prepare` or `status`. It requires local root, a
+The public maintenance commands are `directory-prepare` and `directory-status`.
+Bootstrap requires local root, a
 trusted installed-appliance marker, a mounted ext4/XFS/Btrfs data filesystem and
 an explicit root-owned plan at `/etc/smolofis/directory-plan.json`:
 
@@ -88,11 +91,34 @@ unsafe artifacts, failure retention and SIGKILL/no-replay behavior:
 python3 scripts/dev/identity/vm/lab.py check-office-bootstrap
 ```
 
-Samba packages/runtime integration, private CA and LDAPS certificate lifecycle,
-reader/administrator accounts, DNS/address validation, backup/restore, reboot,
-upgrade/fallback, deliberate install/start and local recovery still precede
-production use. The existing isolated M0 directory is never reused as the
-production office directory.
+The BIOS and UEFI installed-image jobs prepare a disposable directory and check
+its identity and SYSVOL ACLs after signed upgrade and failed-slot fallback. The
+jobs also exercise explicit service start and stop using a temporary address and
+private CA. A passing run is required to accept these changes.
+
+## Explicit service startup
+
+The image ships `smolofis-directory.service` disabled. On an installed test
+appliance, prepare the directory, assign its planned address, and create
+`/etc/smolofis/directory-tls` as root with mode 0700. Put the private trust CA in
+`ca.pem`, the server certificate in `cert.pem`, and its matching unencrypted key
+in `key.pem`. Each file is root-owned with mode 0600. Issue the certificate for
+TLS server use with the DC's full internal name in its DNS subject alternative
+name. Keep the CA signing key outside the appliance.
+
+Run `sudo systemctl start smolofis-directory.service`. Startup checks the
+prepared state, assigned address, and certificate before launching Samba. The
+start job succeeds after a verified TLS handshake on port 636 and the directory
+returns its LDAP SRV and planned IPv4 records over UDP and TCP DNS. The
+service does not change the host resolver. For trial clients, direct queries for
+the office zone to the DC and trust the CA separately. To stop the directory,
+run `sudo systemctl stop smolofis-directory.service`.
+
+For a trial renewal, stage the replacement files with the same ownership and
+modes, stop the service, replace the three files together, and start the service
+again. Retain the previous still-valid set until the restart passes. Automated
+renewal, reader and administrator accounts, backup/restore, local recovery, and
+production console enablement remain separate acceptance work.
 
 ## Acceptance — 2026-11-12
 
