@@ -5,7 +5,7 @@ After=network-online.target
 RequiresMountsFor=/var/lib/smolofis /etc/smolofis
 
 [Service]
-Type=exec
+Type=notify
 UMask=0077
 RuntimeDirectory=smolofis-directory
 RuntimeDirectoryMode=0700
@@ -13,7 +13,7 @@ TimeoutStartSec=120s
 PrivateTmp=yes
 ProtectHome=yes
 ExecStartPre=/usr/bin/python3 -I /usr/local/lib/smolofis/directory-bootstrap.py runtime-check
-ExecStart=/usr/sbin/samba --foreground --no-process-group \
+ExecStart=/usr/sbin/samba --foreground --no-process-group --debug-stdout \
     --configfile=/var/lib/smolofis/directory/domain/etc/smb.conf \
     "--option=pid directory=/run/smolofis-directory" \
     "--option=old password allowed period=0" \
