@@ -804,7 +804,11 @@ chmod 0644 "$tls/key.pem"
 if systemctl start "$unit"; then exit 1; fi
 chmod 0600 "$tls/key.pem"
 systemctl reset-failed "$unit"
-systemctl start "$unit"
+if ! systemctl start "$unit"; then
+    systemctl status --no-pager "$unit" >&2 || true
+    journalctl --boot --no-pager --unit "$unit" --lines=60 >&2 || true
+    exit 1
+fi
 systemctl is-active --quiet "$unit"
 systemctl stop "$unit"
 if systemctl is-active --quiet "$unit"; then exit 1; fi
